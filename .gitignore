@@ -6,3 +6,4 @@ build/
 .pytest_cache/
 *.so
 .ruff_cache/
+refs/

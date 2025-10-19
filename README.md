@@ -67,14 +67,35 @@ python scripts/run_pipeline.py --config configs/default.yaml
 
 ## Data
 
-This pipeline uses the [KITTI Odometry Dataset](https://www.cvlibs.net/datasets/kitti/eval_odometry.php). Place data at:
+This pipeline uses the [KITTI Odometry Dataset](https://www.cvlibs.net/datasets/kitti/eval_odometry.php).
+
+### Download
+
+1. Register at [cvlibs.net](https://www.cvlibs.net/datasets/kitti/user_register.php) and go to the [odometry evaluation page](https://www.cvlibs.net/datasets/kitti/eval_odometry.php).
+2. Download these files:
+   - **Velodyne laser data** (80 GB uncompressed; sequence 00 alone is ~2.3 GB)
+   - **Calibration files** (1 MB)
+   - **Ground truth poses** (4 KB, sequences 00-10 only)
+3. Extract all archives into `~/data/kitti/odometry/dataset/`:
+
 ```
 ~/data/kitti/odometry/dataset/
 ├── sequences/
 │   ├── 00/
-│   │   ├── velodyne/
-│   │   ├── calib.txt
-│   │   └── ...
+│   │   ├── velodyne/       # .bin point cloud files
+│   │   ├── calib.txt       # calibration matrices
+│   │   └── times.txt       # timestamps
+│   └── ...
+├── poses/
+│   ├── 00.txt              # ground truth (seq 00-10 only)
+│   └── ...
+```
+
+> **WSL2 users**: Store data under `~/data/`, not `/mnt/c/` — cross-filesystem I/O is 10x slower.
+
+4. Verify the dataset:
+```bash
+python scripts/verify_kitti.py --root ~/data/kitti/odometry/dataset --sequence 00
 ```
 
 ## Tech Stack
