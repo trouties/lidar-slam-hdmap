@@ -3,3 +3,118 @@
 Builds a factor graph from odometry and loop closure constraints,
 then optimizes with Levenberg-Marquardt.
 """
+
+from __future__ import annotations
+
+import gtsam
+import numpy as np
+
+
+class PoseGraphOptimizer:
+    """GTSAM-based pose graph optimizer.
+
+    Builds a factor graph from sequential odometry poses and optional
+    loop closure constraints, then runs Levenberg-Marquardt optimization.
+    """
+
+    def __init__(
+        self,
+        odom_sigmas: list[float] | None = None,
+        prior_sigmas: list[float] | None = None,
+    ) -> None:
+        """Initialize optimizer.
+
+        Args:
+            odom_sigmas: 6-element [tx,ty,tz,rx,ry,rz] noise sigmas for
+                odometry factors. Reordered internally to GTSAM convention
+                [rx,ry,rz,tx,ty,tz]. Defaults to [0.1,0.1,0.1,0.01,0.01,0.01].
+            prior_sigmas: 6-element [tx,ty,tz,rx,ry,rz] noise sigmas for
+                the prior factor on pose 0. Defaults to tight values.
+        """
+        if odom_sigmas is None:
+            odom_sigmas = [0.1, 0.1, 0.1, 0.01, 0.01, 0.01]
+        if prior_sigmas is None:
+            prior_sigmas = [0.01, 0.01, 0.01, 0.001, 0.001, 0.001]
+
+        # Reorder config [tx,ty,tz,rx,ry,rz] → GTSAM [rx,ry,rz,tx,ty,tz]
+        self.odom_noise = gtsam.noiseModel.Diagonal.Sigmas(
+            np.array([*odom_sigmas[3:], *odom_sigmas[:3]])
+        )
+        self.prior_noise = gtsam.noiseModel.Diagonal.Sigmas(
+            np.array([*prior_sigmas[3:], *prior_sigmas[:3]])
+        )
+
+        self.graph = gtsam.NonlinearFactorGraph()
+        self.initial_values = gtsam.Values()
+        self.n_poses = 0
+
+    def build_graph(self, poses: list[np.ndarray]) -> None:
+        """Build pose graph from sequential odometry poses.
+
+        Adds a prior on pose 0 and BetweenFactorPose3 for each
+        consecutive pair (i, i+1).
+
+        Args:
+            poses: List of 4x4 SE(3) pose matrices from odometry.
+        """
+        self.graph = gtsam.NonlinearFactorGraph()
+        self.initial_values = gtsam.Values()
+        self.n_poses = len(poses)
+
+        # Prior on first pose
+        self.graph.add(gtsam.PriorFactorPose3(0, gtsam.Pose3(poses[0]), self.prior_noise))
+
+        # Insert initial values and between factors
+        for i, pose in enumerate(poses):
+            self.initial_values.insert(i, gtsam.Pose3(pose))
+
+            if i > 0:
+                # Relative transform: delta = T_{i-1}^{-1} @ T_i
+                T_prev_inv = np.linalg.inv(poses[i - 1])
+                delta = T_prev_inv @ pose
+                self.graph.add(
+                    gtsam.BetweenFactorPose3(i - 1, i, gtsam.Pose3(delta), self.odom_noise)
+                )
+
+    def add_loop_closure(
+        self,
+        i: int,
+        j: int,
+        relative_pose: np.ndarray,
+        sigmas: list[float] | None = None,
+    ) -> None:
+        """Add a loop closure constraint between poses i and j.
+
+        Args:
+            i: Source pose index.
+            j: Target pose index.
+            relative_pose: 4x4 relative SE(3) transform from i to j.
+            sigmas: Optional 6-element [tx,ty,tz,rx,ry,rz] noise sigmas.
+                Uses odometry noise if not specified.
+        """
+        if sigmas is not None:
+            noise = gtsam.noiseModel.Diagonal.Sigmas(np.array([*sigmas[3:], *sigmas[:3]]))
+        else:
+            noise = self.odom_noise
+
+        self.graph.add(gtsam.BetweenFactorPose3(i, j, gtsam.Pose3(relative_pose), noise))
+
+    def optimize(self) -> list[np.ndarray]:
+        """Run Levenberg-Marquardt optimization.
+
+        Returns:
+            List of optimized 4x4 SE(3) pose matrices.
+        """
+        params = gtsam.LevenbergMarquardtParams()
+        optimizer = gtsam.LevenbergMarquardtOptimizer(self.graph, self.initial_values, params)
+        result = optimizer.optimize()
+
+        optimized_poses = []
+        for i in range(self.n_poses):
+            optimized_poses.append(result.atPose3(i).matrix())
+        return optimized_poses
+
+    @property
+    def graph_size(self) -> int:
+        """Number of factors in the graph."""
+        return self.graph.size()
