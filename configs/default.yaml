@@ -19,3 +19,6 @@ ekf:
 
 mapping:
   voxel_size: 0.1
+
+output:
+  dir: "results"

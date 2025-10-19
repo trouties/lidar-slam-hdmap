@@ -7,3 +7,4 @@ build/
 *.so
 .ruff_cache/
 refs/
+results/
