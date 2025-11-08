@@ -83,6 +83,27 @@ class KissICPOdometry:
                 f.write(" ".join(f"{v:.6e}" for v in row) + "\n")
 
 
+def transform_poses_to_camera_frame(
+    poses: list[np.ndarray],
+    Tr: np.ndarray,
+) -> list[np.ndarray]:
+    """Transform poses from Velodyne frame to camera frame.
+
+    KISS-ICP outputs poses in Velodyne coordinates. KITTI ground truth
+    is in left camera coordinates. This function converts:
+        T_cam = Tr @ T_velo @ Tr_inv
+
+    Args:
+        poses: List of 4x4 poses in Velodyne frame.
+        Tr: 4x4 Velodyne-to-camera calibration matrix.
+
+    Returns:
+        List of 4x4 poses in camera frame.
+    """
+    Tr_inv = np.linalg.inv(Tr)
+    return [Tr @ pose @ Tr_inv for pose in poses]
+
+
 def evaluate_odometry(
     est_poses: list[np.ndarray],
     gt_poses: list[np.ndarray] | np.ndarray,

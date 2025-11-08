@@ -10,7 +10,11 @@ import yaml
 
 from src.data.kitti_loader import KITTIDataset
 from src.fusion.eskf import ESKF
-from src.odometry.kiss_icp_wrapper import KissICPOdometry, evaluate_odometry
+from src.odometry.kiss_icp_wrapper import (
+    KissICPOdometry,
+    evaluate_odometry,
+    transform_poses_to_camera_frame,
+)
 from src.optimization.loop_closure import LoopClosureDetector
 from src.optimization.pose_graph import PoseGraphOptimizer
 
@@ -29,6 +33,12 @@ def main() -> None:
         default="configs/default.yaml",
         help="Path to configuration file",
     )
+    parser.add_argument(
+        "--max-frames",
+        type=int,
+        default=None,
+        help="Limit number of frames to process (for quick testing)",
+    )
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -41,8 +51,13 @@ def main() -> None:
         root_path=config["data"]["kitti_root"],
         sequence=config["data"]["sequence"],
     )
+    if args.max_frames is not None and args.max_frames < len(dataset):
+        dataset.scan_files = dataset.scan_files[: args.max_frames]
+        print(f"  Limited to {args.max_frames} frames")
     print(f"  Sequence: {dataset.sequence}")
     print(f"  Frames: {len(dataset)}")
+    print(f"  Calibration: {'loaded' if dataset.calibration else 'missing'}")
+    print(f"  Ground truth: {'yes' if dataset.poses is not None else 'no'}")
     if len(dataset) == 0:
         print("  No scans found. Check data path and run scripts/verify_kitti.py")
         return
@@ -55,14 +70,18 @@ def main() -> None:
         min_range=kiss_cfg.get("min_range", 5.0),
         voxel_size=kiss_cfg.get("voxel_size", 1.0),
     )
-    poses = odom.run(dataset)
+    poses_velo = odom.run(dataset)
 
-    # Save poses
+    # Transform from Velodyne frame to camera frame for evaluation
+    Tr = dataset.calibration["Tr"] if dataset.calibration else np.eye(4)
+    poses = transform_poses_to_camera_frame(poses_velo, Tr)
+
+    # Save poses (in camera frame, matching KITTI GT convention)
     poses_path = output_dir / f"poses_{dataset.sequence}.txt"
     KissICPOdometry.save_poses_kitti_format(poses, poses_path)
     print(f"  Saved {len(poses)} poses to {poses_path}")
 
-    # Evaluate odometry against ground truth if available
+    # Evaluate odometry against ground truth
     if dataset.poses is not None:
         print("\n=== Odometry Evaluation ===")
         n = min(len(poses), len(dataset.poses))
@@ -71,14 +90,14 @@ def main() -> None:
         print(f"  APE Mean: {result['ape']['mean']:.4f} m")
         print(f"  RPE RMSE: {result['rpe']['rmse']:.4f} m")
     else:
-        print(f"\n  No ground truth for sequence {dataset.sequence} (only 00-10 have GT)")
+        print(f"\n  No ground truth for sequence {dataset.sequence}")
 
     # --- Stage 3: Pose Graph Optimization ---
     print("\n=== Stage 3: Pose Graph Optimization ===")
     gtsam_cfg = config.get("gtsam", {})
     lc_cfg = config.get("loop_closure", {})
 
-    # Detect loop closures
+    # Detect loop closures (use Velodyne-frame poses for ICP on point clouds)
     detector = LoopClosureDetector(
         distance_threshold=lc_cfg.get("distance_threshold", 15.0),
         min_frame_gap=lc_cfg.get("min_frame_gap", 100),
@@ -122,11 +141,11 @@ def main() -> None:
     )
 
     if dataset.timestamps is not None:
-        fused_poses = eskf.run(optimized_poses, dataset.timestamps)
+        ts = dataset.timestamps[: len(optimized_poses)]
     else:
-        # Fallback: assume 10 Hz
-        timestamps = np.arange(len(optimized_poses)) * 0.1
-        fused_poses = eskf.run(optimized_poses, timestamps)
+        ts = np.arange(len(optimized_poses)) * 0.1
+
+    fused_poses = eskf.run(optimized_poses, ts)
 
     fused_path = output_dir / f"poses_fused_{dataset.sequence}.txt"
     KissICPOdometry.save_poses_kitti_format(fused_poses, fused_path)
