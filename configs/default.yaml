@@ -17,7 +17,7 @@ gtsam:
 loop_closure:
   distance_threshold: 15.0
   min_frame_gap: 100
-  icp_fitness_threshold: 0.3
+  icp_fitness_threshold: 0.9
 
 ekf:
   process_noise_pos: 0.1
