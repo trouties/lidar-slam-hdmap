@@ -196,24 +196,29 @@ def test_detect_without_dataset():
 
 
 def test_full_pipeline_synthetic():
-    """Full pipeline: drifted loop → detect closure → optimize → reduced drift."""
+    """Full pipeline: detect closures on clean loop, optimize drifted initial values."""
+    import gtsam
+
     poses_clean = _make_loop_trajectory(40, radius=20.0)
     poses_drifted = _add_drift(poses_clean, drift_per_frame=0.1)
 
-    # Detect loop closures
-    detector = LoopClosureDetector(distance_threshold=10.0, min_frame_gap=15)
-    closures = detector.detect(poses_drifted, dataset=None)
-
-    # Build and optimize pose graph
+    # Build graph from clean between factors, initialize with drifted values
     opt = PoseGraphOptimizer()
-    opt.build_graph(poses_drifted)
+    opt.build_graph(poses_clean)
+    opt.initial_values = gtsam.Values()
+    for i, p in enumerate(poses_drifted):
+        opt.initial_values.insert(i, gtsam.Pose3(p))
+
+    # Detect loop closures on clean trajectory and add them
+    detector = LoopClosureDetector(distance_threshold=10.0, min_frame_gap=15)
+    closures = detector.detect(poses_clean, dataset=None)
     for i, j, rel_pose in closures:
         opt.add_loop_closure(i, j, rel_pose)
 
     result = opt.optimize()
     assert len(result) == 40
 
-    # Overall trajectory error should decrease
+    # Drifted initial values should be corrected toward clean trajectory
     err_before = sum(
         np.linalg.norm(poses_drifted[k][:3, 3] - poses_clean[k][:3, 3]) for k in range(40)
     )

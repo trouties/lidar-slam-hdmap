@@ -37,6 +37,9 @@ class LoopClosureDetector:
     def detect_candidates(self, poses: list[np.ndarray]) -> list[tuple[int, int]]:
         """Find loop closure candidates based on pose distance.
 
+        For each frame j, finds the single closest earlier frame i
+        (with sufficient gap) below the distance threshold.
+
         Args:
             poses: List of 4x4 SE(3) poses.
 
@@ -49,11 +52,12 @@ class LoopClosureDetector:
 
         for j in range(self.min_frame_gap, n):
             # Compare against all earlier poses with sufficient gap
-            diffs = translations[: j - self.min_frame_gap + 1] - translations[j]
+            search_end = j - self.min_frame_gap + 1
+            diffs = translations[:search_end] - translations[j]
             dists = np.linalg.norm(diffs, axis=1)
-            close_indices = np.where(dists < self.distance_threshold)[0]
-            for i in close_indices:
-                candidates.append((int(i), j))
+            min_idx = int(np.argmin(dists))
+            if dists[min_idx] < self.distance_threshold:
+                candidates.append((min_idx, j))
 
         return candidates
 
@@ -82,8 +86,8 @@ class LoopClosureDetector:
         tgt_pcd.points = o3d.utility.Vector3dVector(target_points[:, :3])
 
         # Downsample for speed
-        src_pcd = src_pcd.voxel_down_sample(voxel_size=0.5)
-        tgt_pcd = tgt_pcd.voxel_down_sample(voxel_size=0.5)
+        src_pcd = src_pcd.voxel_down_sample(voxel_size=1.0)
+        tgt_pcd = tgt_pcd.voxel_down_sample(voxel_size=1.0)
 
         result = o3d.pipelines.registration.registration_icp(
             src_pcd,
