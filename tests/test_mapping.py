@@ -169,6 +169,121 @@ def test_cluster_points_finds_two_groups():
     assert sizes[0] >= 30 and sizes[1] >= 30
 
 
+def test_cluster_points_trims_minor_axis_outliers():
+    """A clean thin line along x plus a few y=0.5 bridge fragments should
+    come out as one cluster with the bridge points removed by the MAD trim.
+
+    The bridge points are close enough (y=0.5 < eps=0.7) to get absorbed
+    into the DBSCAN cluster, but they lie far enough outside the ~3 cm
+    MAD of the real paint line that the minor-axis trim should catch them.
+    """
+    rng = np.random.default_rng(7)
+    line = np.column_stack(
+        [
+            np.linspace(0.0, 5.0, 200),
+            rng.normal(0.0, 0.03, size=200),  # paint-width sigma ~3 cm
+            np.full(200, -1.73),
+        ]
+    )
+    # Bridge points: near-enough on x to be connected into the cluster, but
+    # offset ~0.5 m on y (far beyond the line's real thickness).
+    bridge = np.array(
+        [
+            [1.0, 0.5, -1.73],
+            [2.0, 0.52, -1.73],
+            [3.0, 0.48, -1.73],
+            [4.0, 0.51, -1.73],
+        ]
+    )
+    points = np.vstack([line, bridge])
+
+    clusters = cluster_points(points, eps=0.7, min_points=40)
+
+    assert len(clusters) == 1
+    result = clusters[0]
+    # Bridge outliers gone: minor axis span well under their 0.5 m offset.
+    assert float(np.ptp(result[:, 1])) < 0.3
+    # Line inliers preserved; tiny MAD clip on the ~3cm tails is acceptable.
+    assert 190 <= result.shape[0] <= 204
+
+
+def test_cluster_points_trim_preserves_clean_line():
+    """Without outliers, the trim should leave a clean line nearly untouched."""
+    rng = np.random.default_rng(11)
+    line = np.column_stack(
+        [
+            np.linspace(0.0, 5.0, 200),
+            rng.normal(0.0, 0.03, size=200),
+            np.full(200, -1.73),
+        ]
+    )
+
+    clusters = cluster_points(line, eps=0.7, min_points=40)
+
+    assert len(clusters) == 1
+    assert clusters[0].shape[0] >= int(0.96 * line.shape[0])
+
+
+def test_cluster_points_drops_below_min_points_after_trim():
+    """A cluster that survives DBSCAN but shrinks below min_points after
+    outlier trim should be dropped entirely."""
+    rng = np.random.default_rng(3)
+    # Dense core of 42 points (just above min_points=40) on a short line.
+    core = np.column_stack(
+        [
+            np.linspace(0.0, 1.0, 42),
+            rng.normal(0.0, 0.03, size=42),
+            np.full(42, -1.73),
+        ]
+    )
+    # 8 bridge outliers connected by a chain on x.
+    outliers = np.column_stack(
+        [
+            np.linspace(0.1, 0.9, 8),
+            np.full(8, 0.5),
+            np.full(8, -1.73),
+        ]
+    )
+    points = np.vstack([core, outliers])
+
+    # The raw union (50 pts) passes DBSCAN; after MAD trim the 8 bridge
+    # points get chopped, leaving ~42 inliers. Still >= min_points=40 so
+    # the cluster survives. To force the drop, raise min_points to 45.
+    clusters = cluster_points(points, eps=0.7, min_points=45, trim_k=2.5)
+
+    assert clusters == []
+
+
+def test_cluster_points_trim_disabled_is_regression_anchor():
+    """trim_k=None reproduces the pre-trim behavior — used as a regression
+    anchor so we can verify the new default against the legacy path."""
+    rng = np.random.default_rng(4)
+    line = np.column_stack(
+        [
+            np.linspace(0.0, 5.0, 200),
+            rng.normal(0.0, 0.03, size=200),
+            np.full(200, -1.73),
+        ]
+    )
+    outliers = np.column_stack(
+        [
+            np.linspace(0.5, 4.5, 10),
+            np.full(10, 0.5),
+            np.full(10, -1.73),
+        ]
+    )
+    points = np.vstack([line, outliers])
+
+    clusters_disabled = cluster_points(points, eps=0.7, min_points=40, trim_k=None)
+    clusters_default = cluster_points(points, eps=0.7, min_points=40)
+
+    # Disabled path keeps all 210 points in one cluster; default path trims.
+    assert len(clusters_disabled) == 1
+    assert clusters_disabled[0].shape[0] == 210
+    assert len(clusters_default) == 1
+    assert clusters_default[0].shape[0] < 210
+
+
 def test_save_features_geojson_writes_valid_json(tmp_path):
     """GeoJSON file should be valid JSON with the expected structure."""
     clusters = [

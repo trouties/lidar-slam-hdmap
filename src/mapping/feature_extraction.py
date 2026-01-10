@@ -59,20 +59,68 @@ def extract_lane_markings(
     return road_points[mask]
 
 
+def _trim_cluster_minor_axis(cluster: np.ndarray, k: float = 2.5) -> np.ndarray:
+    """Remove per-cluster outliers along the PCA minor axis using MAD.
+
+    A side effect of the ``dbscan_eps=0.7`` setting used by
+    :func:`cluster_points` is that virtual-lane fragments get bridged, which
+    widens the minor-axis spread of otherwise-thin lane-marking clusters.
+    Normal-consistent MAD (``1.4826 * median absolute deviation``) is robust
+    to the heavy-tailed residuals those bridges produce.
+
+    ``k=2.5`` keeps ~99% of a clean Gaussian line while still clipping the
+    DBSCAN bridge residuals (typically > 1.2 sigma_hat off-axis). A single
+    pass is sufficient; Stage 6 ``_pca_stats`` (``lanelet2_export.py``) uses
+    2/98 percentile spans as a second safety net.
+
+    Args:
+        cluster: ``(N, 3)`` points in world-frame meters.
+        k: MAD multiplier. Points with ``|resid| > k * sigma_hat`` on the
+            minor axis are dropped.
+
+    Returns:
+        A possibly-smaller ``(M, 3)`` cluster (``M <= N``).
+    """
+    if cluster.shape[0] < 10:
+        # PCA is unstable on tiny clusters; leave them untouched. Downstream
+        # ``min_points`` filtering catches genuinely-small noise clusters.
+        return cluster
+
+    xy = cluster[:, :2]
+    centered = xy - xy.mean(axis=0)
+    cov = np.cov(centered.T)
+    _, eigvecs = np.linalg.eigh(cov)  # ascending eigenvalues
+    minor_axis = eigvecs[:, 0]
+    resid = centered @ minor_axis
+    med = np.median(resid)
+    mad = np.median(np.abs(resid - med)) + 1e-9
+    sigma_hat = 1.4826 * mad
+    mask = np.abs(resid - med) <= k * sigma_hat
+    return cluster[mask]
+
+
 def cluster_points(
     points: np.ndarray,
     eps: float,
     min_points: int,
+    trim_k: float | None = 2.5,
 ) -> list[np.ndarray]:
     """Cluster 3D points with DBSCAN and return one array per cluster.
 
     Uses Open3D's built-in ``cluster_dbscan``. Noise points (label = -1)
-    are discarded.
+    are discarded. Each surviving cluster is optionally trimmed along its
+    PCA minor axis with MAD-based outlier rejection — see
+    :func:`_trim_cluster_minor_axis`. Clusters that fall below
+    ``min_points`` after trimming are dropped entirely.
 
     Args:
         points: (N, 3) points to cluster.
         eps: Neighborhood radius (m).
-        min_points: Minimum points for a core sample.
+        min_points: Minimum points for a core sample; also the minimum
+            cluster size that survives the post-trim re-check.
+        trim_k: MAD multiplier for the minor-axis outlier trim. ``None``
+            or ``0`` disables the trim entirely (used by tests as a
+            regression anchor).
 
     Returns:
         List of (k_i, 3) arrays, one per cluster.
@@ -91,8 +139,13 @@ def cluster_points(
     max_label = int(labels.max()) if labels.max() >= 0 else -1
     for label in range(max_label + 1):
         cluster = points[labels == label]
-        if cluster.shape[0] > 0:
-            clusters.append(cluster)
+        if cluster.shape[0] == 0:
+            continue
+        if trim_k is not None and trim_k > 0:
+            cluster = _trim_cluster_minor_axis(cluster, k=trim_k)
+            if cluster.shape[0] < min_points:
+                continue
+        clusters.append(cluster)
     return clusters
 
 

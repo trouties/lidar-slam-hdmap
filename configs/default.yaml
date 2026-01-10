@@ -44,7 +44,7 @@ export:
   lon0: 8.4
   min_linearity: 0.75              # PCA xy linearity 阈值; line_* 类别下限
   min_length: 1.0                  # m; 主轴跨度低于此则丢为 noise
-  line_thin_max_thickness: 0.8     # m; 匹配 dbscan_eps=0.7 + 余量
+  line_thin_max_thickness: 0.8     # m; 匹配 dbscan_eps=0.7 + 余量; voxel=0.15 的自然 snap spread 让更紧阈值会误判
   line_thick_max_thickness: 2.0    # m; 超过此值归为 area (人行横道/路口涂装)
   polyline_bin_size: 0.5           # m; 把线状簇压成 polyline 的分箱宽度
 
