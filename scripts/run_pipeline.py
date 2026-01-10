@@ -391,6 +391,7 @@ def run_pipeline_cached(
             z_max=float(mapping_cfg.get("curb_z_max", -1.2)),
             height_min=float(mapping_cfg.get("curb_height_min", 0.10)),
             height_max=float(mapping_cfg.get("curb_height_max", 0.25)),
+            road_z_top=float(mapping_cfg.get("curb_road_z_top", -1.55)),
         )
         curb_pts_count = int(curb_pts.shape[0])
         if verbose:
@@ -399,7 +400,8 @@ def run_pipeline_cached(
         curb_clusters = cluster_points(
             curb_pts,
             eps=float(mapping_cfg.get("curb_dbscan_eps", 0.5)),
-            min_points=int(mapping_cfg.get("curb_dbscan_min_points", 40)),
+            min_points=int(mapping_cfg.get("curb_dbscan_min_points", 10)),
+            trim_k=float(mapping_cfg.get("curb_trim_k", 1.2)),
         )
         if verbose:
             print(f"  Curb clusters: {len(curb_clusters)}")

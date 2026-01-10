@@ -307,7 +307,12 @@ def _flat_ground_xyz(
 def test_extract_curbs_detects_height_step():
     """A 0.15 m ridge along y=0 on a flat ground patch should light up the
     curb detector in cells covering the ridge and return only the top-of-
-    step slab."""
+    step slab.
+
+    Geometry: ground at z=-1.73, ridge top at z=-1.58. The ridge cells
+    contain BOTH ground points (zmin=-1.73) AND ridge points (zmax=-1.58),
+    so they straddle road_z_top=-1.65 — passing the curb cell test.
+    """
     ground = _flat_ground_xyz(n=4000, z=-1.73, seed=1)
     # 10 m long, 0.4 m wide raised strip at y in [0.0, 0.4], z = -1.58.
     rng = np.random.default_rng(2)
@@ -328,6 +333,7 @@ def test_extract_curbs_detects_height_step():
         z_max=-1.2,
         height_min=0.10,
         height_max=0.25,
+        road_z_top=-1.65,
         top_band=0.03,
     )
 
@@ -350,6 +356,7 @@ def test_extract_curbs_ignores_flat_ground():
         z_max=-1.2,
         height_min=0.10,
         height_max=0.25,
+        road_z_top=-1.65,
     )
 
     assert curb_pts.shape == (0, 3)
@@ -379,6 +386,42 @@ def test_extract_curbs_rejects_tall_walls():
         z_max=-1.2,
         height_min=0.10,
         height_max=0.25,
+        road_z_top=-1.65,
+    )
+
+    assert curb_pts.shape == (0, 3)
+
+
+def test_extract_curbs_rejects_step_below_road_top():
+    """A short height step entirely BELOW road_z_top (e.g. a road dip /
+    pothole edge) must be rejected — true curbs straddle road_z_top."""
+    rng = np.random.default_rng(8)
+    # A "dip" cell: zmin=-1.85 (deep), zmax=-1.70 (still below road_z_top=-1.55)
+    # Range = 0.15, valid for height_min/max, but zmax does NOT exceed road_z_top.
+    pit_floor = np.column_stack(
+        [
+            rng.uniform(-5.0, 5.0, size=1500),
+            rng.uniform(-2.0, 2.0, size=1500),
+            np.full(1500, -1.85),
+        ]
+    )
+    pit_top = np.column_stack(
+        [
+            rng.uniform(-5.0, 5.0, size=1500),
+            rng.uniform(-2.0, 2.0, size=1500),
+            np.full(1500, -1.70),
+        ]
+    )
+    points = np.vstack([pit_floor, pit_top])
+
+    curb_pts = extract_curbs(
+        points,
+        grid_size=0.3,
+        z_min=-2.0,
+        z_max=-1.2,
+        height_min=0.10,
+        height_max=0.25,
+        road_z_top=-1.55,
     )
 
     assert curb_pts.shape == (0, 3)
@@ -418,6 +461,7 @@ def test_extract_curbs_respects_z_window():
         z_max=-1.2,
         height_min=0.10,
         height_max=0.25,
+        road_z_top=-1.55,
     )
 
     assert curb_pts.shape == (0, 3)

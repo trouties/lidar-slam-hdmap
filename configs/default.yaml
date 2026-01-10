@@ -43,8 +43,14 @@ mapping:
   curb_z_max: -1.2             # 路缘 z 上界 (ground+0.5m, 捕获台阶上沿)
   curb_height_min: 0.10        # 最小台阶高度 (m); 0.08 会踩 voxel=0.15 snap 噪声 (~0.03 σ)
   curb_height_max: 0.25        # 最大台阶高度 (m); 更高归为墙/车/绿化带
-  curb_dbscan_eps: 0.5         # 比 lane 紧; curb 是物理连续线不需要桥接虚线
-  curb_dbscan_min_points: 40   # 和 lane 一致以维持 trim 助手行为可预期
+  curb_road_z_top: -1.55       # 路面上沿 z (m); cell 必须跨越此 z (zmin<=top<zmax) 才算 curb
+                               # 比 road_z_max=-1.5 低 5cm 以捕捉极矮 (~5cm) curb
+  curb_dbscan_eps: 0.6         # eps>=0.7 在稀疏候选上形成 2m 圆形 blob (lin~0.7)
+                               # eps=0.6 + mp=10 + trim_k=1.2 让 cluster 沿 curb 线延伸
+                               # 实测 (g=0.30 grid): good rate 21% vs eps=0.5 的 16%
+  curb_dbscan_min_points: 10   # 候选 ~2 pts/cell, mp=10 ≈ 5 cells (~1m 沿线)
+  curb_trim_k: 1.2             # MAD trim 比 lane (k=2.5) 紧, 把 blob 修成线
+                               # k=1.2 对应 ~88% Gaussian 保留率, 砍掉对角延伸点
 
 export:
   lat0: 49.0                       # 假 WGS84 原点 (KITTI Karlsruhe 附近); seq 00 无真实 GPS

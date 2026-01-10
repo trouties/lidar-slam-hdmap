@@ -66,13 +66,15 @@ def extract_curbs(
     z_max: float = -1.2,
     height_min: float = 0.10,
     height_max: float = 0.25,
+    road_z_top: float = -1.55,
     top_band: float = 0.03,
 ) -> np.ndarray:
     """Detect curb-top points via xy-grid height-step filtering.
 
     Returns points that sit on the *upper* edge of a short vertical step
-    in the road-adjacent z band — i.e. curb tops, which form the
-    continuous line along a road boundary that DBSCAN can then cluster.
+    that **straddles the road-surface upper boundary** — i.e. curb tops,
+    which form the continuous line along a road boundary that DBSCAN can
+    then cluster.
 
     The project spec describes this feature as "法向量 + 曲率：路缘检测
     （曲率突变 = 路面边界）". On a voxelized ground map (working voxel
@@ -83,6 +85,14 @@ def extract_curbs(
     on a 30M-point working map is not memory-safe; this function only
     allocates ``O(N)`` int64 keys plus ``O(C)`` per-cell arrays
     (``C`` = unique xy cells ``<< N``).
+
+    The ``road_z_top`` parameter is what makes the result semantically a
+    *curb* and not just any short height step. A cell qualifies only if
+    its zmin sits at or below ``road_z_top`` (the cell contains road
+    points) AND its zmax is strictly above ``road_z_top`` (the cell also
+    contains points just above the road). Without this constraint the
+    detector lights up on every wall / parked car / road dip whose
+    *internal* range happens to fall in ``[height_min, height_max]``.
 
     Args:
         points: ``(N, 3)`` XYZ in world (Velodyne) frame.
@@ -98,6 +108,11 @@ def extract_curbs(
             from 0.15 m voxel snap.
         height_max: Maximum per-cell ``zmax - zmin`` — larger jumps get
             rejected as walls / vehicles / vegetation.
+        road_z_top: Road-surface upper-boundary z (m). A cell must
+            straddle this z to be considered a curb cell — see above.
+            Default -1.55 sits 0.05 m below ``road_z_max`` so the slight
+            lane-filter / curb-filter overlap captures the very lowest
+            curbs (~5 cm).
         top_band: Keep points within this distance (m) of the cell ``zmax``.
             Default 0.03 m captures the top ~3 cm slab of the step.
 
@@ -143,7 +158,12 @@ def extract_curbs(
     np.maximum.at(zmax, inverse, band[:, 2])
 
     cell_range = zmax - zmin
-    cell_mask = (cell_range >= height_min) & (cell_range <= height_max)
+    cell_mask = (
+        (cell_range >= height_min)
+        & (cell_range <= height_max)
+        & (zmin <= road_z_top)
+        & (zmax > road_z_top)
+    )
     if not np.any(cell_mask):
         return np.zeros((0, 3), dtype=points.dtype)
 
