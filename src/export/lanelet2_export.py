@@ -397,10 +397,18 @@ def _add_node(
 def _build_osm_xml(features: list[dict], lat0: float, lon0: float) -> ET.Element:
     """Build the OSM XML tree from classified features.
 
-    ``features`` items: ``{"kind": "polyline"|"area", "type": str, "vertices": (P, 3)}``.
+    ``features`` items::
+
+        {
+            "kind": "polyline" | "area",
+            "type": str,                # OSM type tag value
+            "vertices": (P, 3) ndarray,
+            "extra_tags": dict[str, str],   # optional, stable-ordered metadata
+        }
 
     Features are sorted by centroid (x, y) before emission so node/way IDs
-    are deterministic across runs (test stability).
+    are deterministic across runs (test stability). ``extra_tags`` keys are
+    written in their dict insertion order so XML output is stable.
     """
     root = ET.Element("osm", {"version": "0.6", "generator": "lidar-slam-hdmap"})
 
@@ -447,6 +455,8 @@ def _build_osm_xml(features: list[dict], lat0: float, lon0: float) -> ET.Element
         else:
             ET.SubElement(way, "tag", {"k": "type", "v": type_tag})
             ET.SubElement(way, "tag", {"k": "subtype", "v": "solid"})
+        for k, v in feat.get("extra_tags", {}).items():
+            ET.SubElement(way, "tag", {"k": k, "v": v})
         body_ways.append(way)
 
     # Move nodes from container into ordered list (preserving creation order).
@@ -486,6 +496,22 @@ _DEFAULT_CURB_CFG = {
 }
 
 
+def _stats_tags(stats: dict, vertex_count: int, source_points: int) -> dict[str, str]:
+    """Build a deterministic, downstream-readable tag dict from PCA stats.
+
+    Lets consumers filter / inspect lane and curb ways without rerunning
+    Stage 6. All values are formatted to fixed precision so the OSM file
+    is byte-stable across runs with identical inputs.
+    """
+    return {
+        "length_m": f"{stats['length']:.2f}",
+        "thickness_m": f"{stats['thickness']:.2f}",
+        "linearity": f"{stats['linearity']:.3f}",
+        "vertex_count": str(int(vertex_count)),
+        "source_points": str(int(source_points)),
+    }
+
+
 def _classify_lane_features(
     lane_clusters: list[np.ndarray],
     *,
@@ -516,11 +542,25 @@ def _classify_lane_features(
             if polyline is None:
                 counts["dropped"] += 1
                 continue
-            features.append({"kind": "polyline", "type": label, "vertices": polyline})
+            features.append(
+                {
+                    "kind": "polyline",
+                    "type": label,
+                    "vertices": polyline,
+                    "extra_tags": _stats_tags(stats, polyline.shape[0], cluster.shape[0]),
+                }
+            )
             counts[label] += 1
         elif label == "area":
             polygon = cluster_to_polygon(cluster, stats)
-            features.append({"kind": "area", "type": "zebra_marking", "vertices": polygon})
+            features.append(
+                {
+                    "kind": "area",
+                    "type": "zebra_marking",
+                    "vertices": polygon,
+                    "extra_tags": _stats_tags(stats, polygon.shape[0], cluster.shape[0]),
+                }
+            )
             counts["area"] += 1
 
     return features, counts
@@ -559,9 +599,19 @@ def _classify_curb_features(
         if polyline is None:
             counts["dropped"] += 1
             continue
-        features.append({"kind": "polyline", "type": "curb", "vertices": polyline})
+        rescued = bool(stats.get("trim_applied"))
+        extra_tags = _stats_tags(stats, polyline.shape[0], effective.shape[0])
+        extra_tags["rescued"] = "true" if rescued else "false"
+        features.append(
+            {
+                "kind": "polyline",
+                "type": "curb",
+                "vertices": polyline,
+                "extra_tags": extra_tags,
+            }
+        )
         counts["kept"] += 1
-        if stats.get("trim_applied"):
+        if rescued:
             counts["rescued"] += 1
 
     return features, counts

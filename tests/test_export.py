@@ -373,6 +373,63 @@ def test_export_rescued_counter_tracks_trim_recoveries(tmp_path):
     assert way_types["curb"] == 2
 
 
+def test_export_lane_ways_carry_geometry_metadata_tags(tmp_path):
+    lane_clusters = [
+        _thin_line(n=80, length=6.0, seed=80),
+        _blob(n=300, side=5.0, seed=81),
+    ]
+    out = tmp_path / "map_lane_meta.osm"
+    export_lanelet2_osm(lane_clusters, [], out)
+
+    tree = ET.parse(out)
+    ways = tree.getroot().findall("way")
+    assert len(ways) == 2
+
+    for way in ways:
+        tag_dict = {t.get("k"): t.get("v") for t in way.findall("tag")}
+        assert "length_m" in tag_dict
+        assert "thickness_m" in tag_dict
+        assert "linearity" in tag_dict
+        assert "vertex_count" in tag_dict
+        assert "source_points" in tag_dict
+        # Sanity-check the parsed values.
+        assert float(tag_dict["length_m"]) > 0
+        assert float(tag_dict["thickness_m"]) >= 0
+        assert 0.0 <= float(tag_dict["linearity"]) <= 1.0
+        assert int(tag_dict["vertex_count"]) >= 2
+        assert int(tag_dict["source_points"]) >= 3
+        # Lane ways do not carry the curb-only "rescued" tag.
+        assert "rescued" not in tag_dict
+
+
+def test_export_curb_way_rescued_tag_reflects_trim(tmp_path):
+    curb_clusters = [
+        _curb_line(n=80, length=4.0, seed=90),  # clean -> rescued=false
+        _curb_line_with_outliers(seed=91),  # thick-tail -> rescued=true
+    ]
+    out = tmp_path / "map_curb_meta.osm"
+    export_lanelet2_osm([], curb_clusters, out)
+
+    tree = ET.parse(out)
+    curb_ways = [
+        w
+        for w in tree.getroot().findall("way")
+        if any(t.get("k") == "type" and t.get("v") == "curb" for t in w.findall("tag"))
+    ]
+    assert len(curb_ways) == 2
+
+    rescued_flags = []
+    for way in curb_ways:
+        tag_dict = {t.get("k"): t.get("v") for t in way.findall("tag")}
+        assert tag_dict.get("rescued") in {"true", "false"}
+        rescued_flags.append(tag_dict["rescued"])
+        # Geometry metadata also present on curbs.
+        assert "length_m" in tag_dict
+        assert float(tag_dict["thickness_m"]) <= 0.7  # Post-trim thickness gate.
+
+    assert sorted(rescued_flags) == ["false", "true"]
+
+
 def test_export_deterministic_ids(tmp_path):
     lane_clusters = [_thin_line(n=80, length=6.0, seed=50)]
     curb_clusters = [_curb_line(n=80, length=4.0, seed=51)]
