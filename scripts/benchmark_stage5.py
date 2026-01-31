@@ -98,6 +98,7 @@ def _collect_rows(all_summaries: list[dict]) -> list[tuple[str, list]]:
     rows.append(("lane dropped", _col("metrics.stage6.lane.dropped")))
     rows.append(("lane inputs", _col("metrics.stage6.lane.total_input")))
     rows.append(("curb ways", _col("metrics.stage6.curb.kept")))
+    rows.append(("curb rescued", _col("metrics.stage6.curb.rescued")))
     rows.append(("curb dropped", _col("metrics.stage6.curb.dropped")))
     rows.append(("curb inputs", _col("metrics.stage6.curb.total_input")))
     rows.append(("wall time (s)", _col("wall_time_s")))

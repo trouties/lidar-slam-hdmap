@@ -62,11 +62,14 @@ export:
     line_thin_max_thickness: 0.8   # m; 匹配 dbscan_eps=0.7 + voxel=0.15 自然 snap spread
     line_thick_max_thickness: 2.0  # m; 超过此值归为 area (人行横道/路口涂装)
   curb:                            # 路缘石分类阈值 (单一类别)
-                                   # 阈值依据 Stage 5 v4 实测 + stage6-curb-v1 benchmark 反馈
+                                   # 阈值依据 Stage 5 v4 实测 + stage6-curb-v1/v2/v3 benchmark
                                    # v4 整体: median lin 0.91, median thk 0.46m, median len 1.4m
     min_linearity: 0.75            # 与 lane 一致; "good" 0.80 过严, 长尾分布 lin 跨 0.85-0.97
     min_length: 1.0                # m; v4 中位 1.4m, 1.5m 把一半 cluster 切掉; 1.0 是 polyline_bin 2x
     max_thickness: 0.7             # m; "good" 上限 0.5 → 0.7; 吸收 v4 thickness 长尾 (max ~1.0m)
+    trim_k: 1.0                    # 二次 minor-axis MAD trim sigma 系数 (Stage 5 v4 已用 k=1.2 trim)
+                                   # 仅作用于一次 PCA 后 thickness 单一原因失败的 cluster
+                                   # k=1.0 比 v4 紧, 实测 seq 06/01/10 救回 12+4+3 个 thick-tail cluster
 
 cache:
   enabled: true

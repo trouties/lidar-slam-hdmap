@@ -191,7 +191,7 @@ def test_export_lanelet2_osm_writes_valid_xml(tmp_path):
 
     # Curb channel: empty input -> all zeros.
     curb = counts["curb"]
-    assert curb == {"kept": 0, "dropped": 0, "total_input": 0}
+    assert curb == {"kept": 0, "dropped": 0, "rescued": 0, "total_input": 0}
 
 
 # ---------------------------------------------------------------------------
@@ -238,6 +238,56 @@ def test_classify_curb_too_short_dropped():
     assert label == "noise"
 
 
+def _curb_line_with_outliers(
+    n_clean: int = 60,
+    n_outlier: int = 12,
+    length: float = 4.0,
+    sigma_y_clean: float = 0.10,
+    outlier_offset: float = 1.5,
+    seed: int = 60,
+) -> np.ndarray:
+    """Long thin curb body plus a wad of points pulled away on the minor axis.
+
+    Mimics the seq 06/01/10 failure mode: a real curbstone line with adjacent
+    wall / vegetation points that DBSCAN swept into the same cluster. The
+    body is curb-shaped (length ~4m, sigma_y 0.10m) but the outliers push
+    the raw thickness above 0.7m. A second-pass minor-axis trim recovers the
+    body.
+    """
+    rng = np.random.default_rng(seed)
+    x_body = np.linspace(0.0, length, n_clean)
+    y_body = rng.normal(0.0, sigma_y_clean, n_clean)
+    z_body = np.full(n_clean, -1.46)
+    body = np.column_stack([x_body, y_body, z_body])
+
+    x_out = rng.uniform(0.0, length, n_outlier)
+    y_out = rng.normal(outlier_offset, 0.05, n_outlier)
+    z_out = np.full(n_outlier, -1.46)
+    outliers = np.column_stack([x_out, y_out, z_out])
+
+    return np.vstack([body, outliers])
+
+
+def test_classify_curb_thick_but_trimmable_is_rescued():
+    cluster = _curb_line_with_outliers()
+    label, stats = classify_curb_cluster(cluster)
+    assert label == "curb"
+    assert stats.get("trim_applied") is True
+    # Post-trim thickness should be well below the gate.
+    assert stats["thickness"] <= 0.7
+    # Length should be roughly preserved (trim is on minor axis).
+    assert stats["length"] >= 3.5
+
+
+def test_classify_curb_short_cluster_not_rescued_by_trim():
+    # 0.5m clean line: fails min_length (1.0m). Trim only fixes thickness,
+    # not length, so the rescue branch must not be taken.
+    short = _curb_line(n=20, length=0.5, seed=23)
+    label, stats = classify_curb_cluster(short)
+    assert label == "noise"
+    assert stats.get("trim_applied") is not True
+
+
 def test_export_writes_curb_ways_without_polluting_lane(tmp_path):
     lane_clusters = [
         _thin_line(n=80, length=6.0, seed=30),
@@ -265,6 +315,8 @@ def test_export_writes_curb_ways_without_polluting_lane(tmp_path):
     assert curb["kept"] + curb["dropped"] == 3
     assert curb["kept"] == 2
     assert curb["dropped"] == 1
+    # Clean synthetic curbs do not need the trim retry.
+    assert curb["rescued"] == 0
 
     # OSM contains type=curb ways.
     tree = ET.parse(out_with_curb)
@@ -291,6 +343,34 @@ def test_export_writes_curb_ways_without_polluting_lane(tmp_path):
         assert any(t.get("k") == "subtype" and t.get("v") == "solid" for t in w.findall("tag"))
         # Curb way must NOT be flagged as area.
         assert not any(t.get("k") == "area" for t in w.findall("tag"))
+
+
+def test_export_rescued_counter_tracks_trim_recoveries(tmp_path):
+    # Mix one clean curb (no trim needed) with one thick-but-trimmable curb
+    # (trim required). Expect kept=2, rescued=1, dropped=0.
+    curb_clusters = [
+        _curb_line(n=80, length=4.0, seed=70),
+        _curb_line_with_outliers(seed=71),
+    ]
+    out = tmp_path / "map_rescue.osm"
+    counts = export_lanelet2_osm([], curb_clusters, out)
+
+    curb = counts["curb"]
+    assert curb["total_input"] == 2
+    assert curb["kept"] == 2
+    assert curb["dropped"] == 0
+    assert curb["rescued"] == 1
+
+    # Both should appear as type=curb ways in the OSM file.
+    tree = ET.parse(out)
+    root = tree.getroot()
+    way_types = Counter(
+        tag.get("v")
+        for w in root.findall("way")
+        for tag in w.findall("tag")
+        if tag.get("k") == "type"
+    )
+    assert way_types["curb"] == 2
 
 
 def test_export_deterministic_ids(tmp_path):

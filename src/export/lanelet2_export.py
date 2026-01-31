@@ -134,12 +134,106 @@ def classify_cluster(
     return "noise", stats
 
 
+def _trim_curb_minor_axis(cluster: np.ndarray, stats: dict, k: float = 1.0) -> np.ndarray:
+    """MAD-based minor-axis outlier trim for curb clusters.
+
+    Drops points whose minor-axis projection lies further than ``k`` robust
+    sigmas (1.4826 * MAD) from the minor-axis median. Pure-numpy and idempotent
+    on already-clean clusters. Returns the original cluster if there are too
+    few points or the trim would leave fewer than 3 survivors.
+    """
+    if cluster.shape[0] < 5:
+        return cluster
+    centered = cluster[:, :2] - stats["mean_xy"]
+    pv = centered @ stats["v"]
+    median_v = float(np.median(pv))
+    mad = float(np.median(np.abs(pv - median_v)))
+    if mad < 1e-9:
+        return cluster
+    sigma = 1.4826 * mad  # MAD -> robust stddev estimate
+    mask = np.abs(pv - median_v) <= k * sigma
+    if int(mask.sum()) < 3:
+        return cluster
+    return cluster[mask]
+
+
+def _curb_classify_with_trim(
+    cluster: np.ndarray,
+    *,
+    min_linearity: float,
+    min_length: float,
+    max_thickness: float,
+    trim_k: float,
+) -> tuple[str, dict, np.ndarray]:
+    """Internal: classify curb cluster, optionally rescuing thick-tail clusters
+    via a single minor-axis MAD trim pass.
+
+    Returns ``(label, stats, effective_cluster)``:
+        - ``label``: ``"curb"`` or ``"noise"``
+        - ``stats``: PCA stats from the *effective* cluster (post-trim if
+          rescued, otherwise from the original); includes ``median_z`` and,
+          when applicable, ``trim_applied=True``
+        - ``effective_cluster``: the points to use for downstream geometry
+          (polyline). Equals the trimmed cluster on rescue, otherwise the
+          original.
+
+    Rescue policy: Stage 5 v4 already applies ``trim_k=1.2`` once. Some
+    clusters still have minor-axis spread > ``max_thickness`` because of
+    residual outliers (adjacent wall / vegetation / vehicle points pulled in
+    by DBSCAN). Trimming a second time at a tighter ``k`` recovers them
+    without relaxing global thresholds. Only clusters that fail the first
+    pass *solely* on thickness are eligible -- short or non-linear clusters
+    are dropped without rescue, since trimming on minor axis cannot make a
+    short cluster long or a curved cluster straight.
+    """
+    if cluster.shape[0] < 3:
+        return "noise", {"degenerate": True}, cluster
+
+    stats = _pca_stats(cluster[:, :2])
+    if stats.get("degenerate"):
+        stats["median_z"] = float(np.median(cluster[:, 2]))
+        return "noise", stats, cluster
+
+    stats["median_z"] = float(np.median(cluster[:, 2]))
+
+    # First pass.
+    if stats["length"] < min_length or stats["linearity"] < min_linearity:
+        # Length / linearity failures are not recoverable via minor-axis trim.
+        return "noise", stats, cluster
+
+    if stats["thickness"] <= max_thickness:
+        return "curb", stats, cluster
+
+    # Thickness-only failure: try one trim pass on the minor axis.
+    trimmed = _trim_curb_minor_axis(cluster, stats, k=trim_k)
+    if trimmed.shape[0] < 3 or trimmed.shape[0] == cluster.shape[0]:
+        # Either too few survivors, or trim was a no-op (cluster already clean).
+        return "noise", stats, cluster
+
+    stats2 = _pca_stats(trimmed[:, :2])
+    if stats2.get("degenerate"):
+        return "noise", stats, cluster
+
+    stats2["median_z"] = float(np.median(trimmed[:, 2]))
+
+    if (
+        stats2["length"] >= min_length
+        and stats2["linearity"] >= min_linearity
+        and stats2["thickness"] <= max_thickness
+    ):
+        stats2["trim_applied"] = True
+        return "curb", stats2, trimmed
+
+    return "noise", stats2, cluster
+
+
 def classify_curb_cluster(
     cluster: np.ndarray,
     *,
     min_linearity: float = 0.75,
     min_length: float = 1.0,
     max_thickness: float = 0.7,
+    trim_k: float = 1.0,
 ) -> tuple[str, dict]:
     """Classify a Stage 5 curb cluster.
 
@@ -147,38 +241,35 @@ def classify_curb_cluster(
     only ``"curb"`` or ``"noise"`` -- never thin/thick/area. Defaults are
     derived from Stage 5 v4 measurements: median linearity 0.91, median
     thickness 0.46m (see ``refs/pipeline-notes.md`` "Stage 5 curb 检测调
-    参"). The thresholds leave a safety margin above the v4 medians.
+    参") and the stage6-curb-v2 11-sequence benchmark.
+
+    Internally, clusters that fail the first PCA pass *only* on thickness
+    get one minor-axis MAD-trim retry (controlled by ``trim_k``); see
+    ``_curb_classify_with_trim`` for the rescue policy.
 
     Args:
         cluster: ``(N, 3)`` cluster point array (Velodyne meters).
-        min_linearity: PCA xy linearity floor; v4 median 0.91 leaves room.
-        min_length: Reject clusters whose principal-axis span is below
-            this. Matches the v4 "good" rate length floor (1.5 m).
-        max_thickness: Reject clusters whose minor-axis span exceeds this.
-            Matches the v4 "good" rate thickness ceiling, slightly relaxed
-            (0.5 → 0.6 m) to absorb the long tail above the median.
+        min_linearity: PCA xy linearity floor.
+        min_length: Reject clusters whose principal-axis span is below this.
+        max_thickness: Reject clusters whose minor-axis span exceeds this
+            (after the optional trim retry).
+        trim_k: Sigma multiplier for the second-pass minor-axis MAD trim.
+            Stage 5 v4 already trims at k=1.2; defaults here are tighter
+            (k=1.0) to recover residual thick-tail clusters.
 
     Returns:
         Tuple ``(label, stats)`` where label is ``"curb"`` or ``"noise"``.
+        ``stats`` carries ``trim_applied=True`` when the second pass was
+        used to rescue the cluster.
     """
-    if cluster.shape[0] < 3:
-        return "noise", {"degenerate": True}
-
-    stats = _pca_stats(cluster[:, :2])
-    if stats.get("degenerate"):
-        stats["median_z"] = float(np.median(cluster[:, 2]))
-        return "noise", stats
-
-    stats["median_z"] = float(np.median(cluster[:, 2]))
-
-    if stats["length"] < min_length:
-        return "noise", stats
-    if stats["linearity"] < min_linearity:
-        return "noise", stats
-    if stats["thickness"] > max_thickness:
-        return "noise", stats
-
-    return "curb", stats
+    label, stats, _ = _curb_classify_with_trim(
+        cluster,
+        min_linearity=min_linearity,
+        min_length=min_length,
+        max_thickness=max_thickness,
+        trim_k=trim_k,
+    )
+    return label, stats
 
 
 def cluster_to_polyline(
@@ -391,6 +482,7 @@ _DEFAULT_CURB_CFG = {
     "min_linearity": 0.75,
     "min_length": 1.0,
     "max_thickness": 0.7,
+    "trim_k": 1.0,
 }
 
 
@@ -440,10 +532,17 @@ def _classify_curb_features(
     cfg: dict,
     polyline_bin_size: float,
 ) -> tuple[list[dict], dict]:
-    """Curb channel: single-label classification, polyline geometry only."""
+    """Curb channel: single-label classification, polyline geometry only.
+
+    Uses ``_curb_classify_with_trim`` so that thick-tail clusters get one
+    minor-axis MAD-trim retry. The polyline is built from the *effective*
+    cluster (post-trim when rescued) so its vertices reflect the cleaned
+    geometry, not the original outlier-contaminated points.
+    """
     counts = {
         "kept": 0,
         "dropped": 0,
+        "rescued": 0,
         "total_input": len(curb_clusters),
     }
     features: list[dict] = []
@@ -452,16 +551,18 @@ def _classify_curb_features(
         if cluster.shape[0] < 3:
             counts["dropped"] += 1
             continue
-        label, stats = classify_curb_cluster(cluster, **cfg)
+        label, stats, effective = _curb_classify_with_trim(cluster, **cfg)
         if label == "noise":
             counts["dropped"] += 1
             continue
-        polyline = cluster_to_polyline(cluster, stats, bin_size=polyline_bin_size)
+        polyline = cluster_to_polyline(effective, stats, bin_size=polyline_bin_size)
         if polyline is None:
             counts["dropped"] += 1
             continue
         features.append({"kind": "polyline", "type": "curb", "vertices": polyline})
         counts["kept"] += 1
+        if stats.get("trim_applied"):
+            counts["rescued"] += 1
 
     return features, counts
 
@@ -504,12 +605,14 @@ def export_lanelet2_osm(
 
             {
                 "lane": {"line_thin", "line_thick", "area", "dropped", "total_input"},
-                "curb": {"kept", "dropped", "total_input"},
+                "curb": {"kept", "dropped", "rescued", "total_input"},
             }
 
         Each channel satisfies its own conservation invariant:
         ``line_thin + line_thick + area + dropped == lane.total_input``;
-        ``kept + dropped == curb.total_input``.
+        ``kept + dropped == curb.total_input`` (``rescued`` is a subset of
+        ``kept`` -- the count of clusters that needed a second-pass minor-
+        axis trim to satisfy the thickness gate).
 
     Note:
         Emits LineStrings (lane line_thin/line_thick + curb) and Areas

@@ -451,8 +451,8 @@ def run_pipeline_cached(
             f"(of {lane_c['total_input']})"
         )
         print(
-            f"  Curb: kept={curb_c['kept']} dropped={curb_c['dropped']} "
-            f"(of {curb_c['total_input']})"
+            f"  Curb: kept={curb_c['kept']} (rescued={curb_c['rescued']}) "
+            f"dropped={curb_c['dropped']} (of {curb_c['total_input']})"
         )
     summary["metrics"]["stage6"] = {
         "lane": {k: int(v) for k, v in lane_c.items()},
