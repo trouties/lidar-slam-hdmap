@@ -317,6 +317,65 @@ def cluster_to_polyline(
     return np.array([[v[1], v[2], v[3]] for v in vertices], dtype=np.float64)
 
 
+def _simplify_polyline_rdp(polyline: np.ndarray, epsilon: float) -> np.ndarray:
+    """Ramer-Douglas-Peucker polyline simplification (pure numpy, iterative).
+
+    Drops vertices whose perpendicular distance to the line connecting their
+    neighbors is below ``epsilon`` meters. Operates in 3D using
+    point-to-line distance via cross product. The first and last vertices
+    are always preserved.
+
+    Args:
+        polyline: ``(P, 3)`` ordered vertex array. Returned unchanged when
+            ``P <= 2`` or when ``epsilon <= 0``.
+        epsilon: Tolerance in meters. Recommended ~0.05m (below Velodyne
+            noise) so geometric meaning is preserved while flat segments
+            collapse to their endpoints.
+
+    Returns:
+        ``(P', 3)`` simplified polyline with ``P' <= P``. ``P' >= 2`` always.
+    """
+    if epsilon <= 0.0 or polyline.shape[0] <= 2:
+        return polyline
+
+    n = polyline.shape[0]
+    keep = np.zeros(n, dtype=bool)
+    keep[0] = True
+    keep[-1] = True
+
+    # Iterative stack-based RDP to avoid Python recursion limits on long
+    # polylines. Each stack entry is the (start, end) index pair of an
+    # open segment that still needs to be evaluated.
+    stack: list[tuple[int, int]] = [(0, n - 1)]
+    while stack:
+        start, end = stack.pop()
+        if end - start < 2:
+            continue
+        a = polyline[start]
+        b = polyline[end]
+        ab = b - a
+        ab_norm = float(np.linalg.norm(ab))
+        if ab_norm < 1e-12:
+            # Degenerate segment: distance is just |p - a|.
+            seg = polyline[start + 1 : end]
+            dists = np.linalg.norm(seg - a, axis=1)
+        else:
+            seg = polyline[start + 1 : end]
+            cross = np.cross(seg - a, ab)
+            # ``cross`` is (P, 3) for 3D inputs; its magnitude / |ab| gives
+            # the perpendicular distance from each point to line a-b.
+            cross_norm = np.linalg.norm(cross, axis=1)
+            dists = cross_norm / ab_norm
+        max_idx_local = int(np.argmax(dists))
+        if dists[max_idx_local] > epsilon:
+            split = start + 1 + max_idx_local
+            keep[split] = True
+            stack.append((start, split))
+            stack.append((split, end))
+
+    return polyline[keep]
+
+
 def cluster_to_polygon(cluster: np.ndarray, stats: dict) -> np.ndarray:
     """Reduce a blob cluster to a 4-corner PCA-oriented bounding rectangle.
 
@@ -517,6 +576,7 @@ def _classify_lane_features(
     *,
     cfg: dict,
     polyline_bin_size: float,
+    polyline_simplify_epsilon: float,
 ) -> tuple[list[dict], dict]:
     """Lane channel: thin/thick/area morphology classification."""
     counts = {
@@ -542,6 +602,7 @@ def _classify_lane_features(
             if polyline is None:
                 counts["dropped"] += 1
                 continue
+            polyline = _simplify_polyline_rdp(polyline, polyline_simplify_epsilon)
             features.append(
                 {
                     "kind": "polyline",
@@ -571,6 +632,7 @@ def _classify_curb_features(
     *,
     cfg: dict,
     polyline_bin_size: float,
+    polyline_simplify_epsilon: float,
 ) -> tuple[list[dict], dict]:
     """Curb channel: single-label classification, polyline geometry only.
 
@@ -599,6 +661,7 @@ def _classify_curb_features(
         if polyline is None:
             counts["dropped"] += 1
             continue
+        polyline = _simplify_polyline_rdp(polyline, polyline_simplify_epsilon)
         rescued = bool(stats.get("trim_applied"))
         extra_tags = _stats_tags(stats, polyline.shape[0], effective.shape[0])
         extra_tags["rescued"] = "true" if rescued else "false"
@@ -625,6 +688,7 @@ def export_lanelet2_osm(
     lat0: float = 49.0,
     lon0: float = 8.4,
     polyline_bin_size: float = 0.5,
+    polyline_simplify_epsilon: float = 0.05,
     lane: dict | None = None,
     curb: dict | None = None,
 ) -> dict:
@@ -643,6 +707,10 @@ def export_lanelet2_osm(
             KITTI Odometry has no GPS; defaults pin to the Karlsruhe area.
         polyline_bin_size: Bin width (m) when reducing a linear cluster to
             an ordered polyline. Shared by both channels.
+        polyline_simplify_epsilon: Ramer-Douglas-Peucker tolerance (m)
+            applied after binning. Set to 0 to disable. Defaults to 0.05m
+            (below Velodyne noise) so flat segments collapse to endpoints
+            without losing real curvature.
         lane: Lane classifier overrides. Recognized keys: ``min_linearity``,
             ``min_length``, ``line_thin_max_thickness``,
             ``line_thick_max_thickness``. Unset keys fall back to defaults.
@@ -673,10 +741,16 @@ def export_lanelet2_osm(
     curb_cfg = {**_DEFAULT_CURB_CFG, **(curb or {})}
 
     lane_features, lane_counts = _classify_lane_features(
-        lane_clusters, cfg=lane_cfg, polyline_bin_size=polyline_bin_size
+        lane_clusters,
+        cfg=lane_cfg,
+        polyline_bin_size=polyline_bin_size,
+        polyline_simplify_epsilon=polyline_simplify_epsilon,
     )
     curb_features, curb_counts = _classify_curb_features(
-        curb_clusters, cfg=curb_cfg, polyline_bin_size=polyline_bin_size
+        curb_clusters,
+        cfg=curb_cfg,
+        polyline_bin_size=polyline_bin_size,
+        polyline_simplify_epsilon=polyline_simplify_epsilon,
     )
 
     root = _build_osm_xml(lane_features + curb_features, lat0=lat0, lon0=lon0)

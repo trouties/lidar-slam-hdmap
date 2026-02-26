@@ -56,6 +56,7 @@ export:
   lat0: 49.0                       # 假 WGS84 原点 (KITTI Karlsruhe 附近); seq 00 无真实 GPS
   lon0: 8.4
   polyline_bin_size: 0.5           # m; 线状簇分箱宽度 (lane/curb 共用)
+  polyline_simplify_epsilon: 0.05  # m; RDP 简化容差; 0 禁用; 0.05 低于 Velodyne 噪声
   lane:                            # 车道线分类阈值 (PCA 三档: thin/thick/area)
     min_linearity: 0.75            # PCA xy linearity 下限
     min_length: 1.0                # m; 主轴跨度低于此则丢为 noise

@@ -8,6 +8,7 @@ from collections import Counter
 import numpy as np
 
 from src.export.lanelet2_export import (
+    _simplify_polyline_rdp,
     classify_cluster,
     classify_curb_cluster,
     cluster_to_polygon,
@@ -114,6 +115,52 @@ def test_cluster_to_polyline_orders_along_axis():
     proj = centered @ stats["u"]
     diffs = np.diff(proj)
     assert np.all(diffs > 0) or np.all(diffs < 0)
+
+
+def test_simplify_polyline_collapses_straight_line():
+    # 11 collinear points along x; epsilon 0.05m should leave only the
+    # endpoints.
+    poly = np.column_stack([np.linspace(0.0, 10.0, 11), np.zeros(11), np.full(11, -1.73)])
+    out = _simplify_polyline_rdp(poly, epsilon=0.05)
+    assert out.shape == (2, 3)
+    assert np.allclose(out[0], poly[0])
+    assert np.allclose(out[-1], poly[-1])
+
+
+def test_simplify_polyline_preserves_kink():
+    # L-shape: 5 points along +x, then 5 along +y. Vertex at the corner
+    # has perpendicular distance ~3.5m to the chord between endpoints,
+    # well above epsilon.
+    poly = np.array(
+        [
+            [0.0, 0.0, -1.73],
+            [1.0, 0.0, -1.73],
+            [2.0, 0.0, -1.73],
+            [3.0, 0.0, -1.73],
+            [4.0, 0.0, -1.73],
+            [4.0, 1.0, -1.73],
+            [4.0, 2.0, -1.73],
+            [4.0, 3.0, -1.73],
+            [4.0, 4.0, -1.73],
+        ]
+    )
+    out = _simplify_polyline_rdp(poly, epsilon=0.05)
+    # Endpoints + corner = 3 vertices
+    assert out.shape == (3, 3)
+    # Corner must be (4, 0, -1.73)
+    assert np.allclose(out[1], [4.0, 0.0, -1.73])
+
+
+def test_simplify_polyline_disabled_when_epsilon_zero():
+    poly = np.column_stack([np.linspace(0.0, 5.0, 8), np.zeros(8), np.full(8, -1.73)])
+    out = _simplify_polyline_rdp(poly, epsilon=0.0)
+    assert out.shape == poly.shape
+
+
+def test_simplify_polyline_short_input_passthrough():
+    poly = np.array([[0.0, 0.0, -1.73], [1.0, 0.0, -1.73]])
+    out = _simplify_polyline_rdp(poly, epsilon=0.05)
+    assert out.shape == (2, 3)
 
 
 def test_cluster_to_polygon_returns_four_corners():
