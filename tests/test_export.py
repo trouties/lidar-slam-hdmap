@@ -238,7 +238,13 @@ def test_export_lanelet2_osm_writes_valid_xml(tmp_path):
 
     # Curb channel: empty input -> all zeros.
     curb = counts["curb"]
-    assert curb == {"kept": 0, "dropped": 0, "rescued": 0, "total_input": 0}
+    assert curb == {
+        "kept": 0,
+        "dropped": 0,
+        "rescued": 0,
+        "total_input": 0,
+        "total_length_m": 0.0,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -475,6 +481,36 @@ def test_export_curb_way_rescued_tag_reflects_trim(tmp_path):
         assert float(tag_dict["thickness_m"]) <= 0.7  # Post-trim thickness gate.
 
     assert sorted(rescued_flags) == ["false", "true"]
+
+
+def test_export_total_length_metric_accumulates_kept_features(tmp_path):
+    # Two clean ~4m curbs and one too-short curb. Expect total_length_m to
+    # roughly equal 2 * 4 = 8 m (within polyline reduction tolerance).
+    curb_clusters = [
+        _curb_line(n=80, length=4.0, seed=100),
+        _curb_line(n=80, length=4.0, seed=101),
+        _curb_line(length=0.5, seed=102),  # too short -> dropped
+    ]
+    out = tmp_path / "map_length.osm"
+    counts = export_lanelet2_osm([], curb_clusters, out)
+
+    curb = counts["curb"]
+    assert curb["kept"] == 2
+    assert curb["dropped"] == 1
+    # Length is the PCA principal-axis 2-98 percentile span; expect
+    # ~7.5-8.0m total for two ~4m segments.
+    assert 7.0 <= curb["total_length_m"] <= 8.5
+    # Lane channel had no inputs, so its length is exactly 0.
+    assert counts["lane"]["total_length_m"] == 0.0
+
+
+def test_export_total_length_excludes_dropped_clusters(tmp_path):
+    # Single short cluster -> all dropped, length must stay zero.
+    out = tmp_path / "map_length_zero.osm"
+    counts = export_lanelet2_osm([], [_curb_line(length=0.5, seed=110)], out)
+    assert counts["curb"]["kept"] == 0
+    assert counts["curb"]["dropped"] == 1
+    assert counts["curb"]["total_length_m"] == 0.0
 
 
 def test_export_deterministic_ids(tmp_path):

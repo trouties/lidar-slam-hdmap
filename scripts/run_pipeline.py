@@ -448,15 +448,20 @@ def run_pipeline_cached(
         print(
             f"  Lane: thin={lane_c['line_thin']} thick={lane_c['line_thick']} "
             f"area={lane_c['area']} dropped={lane_c['dropped']} "
-            f"(of {lane_c['total_input']})"
+            f"(of {lane_c['total_input']}) total={lane_c['total_length_m']:.1f}m"
         )
         print(
             f"  Curb: kept={curb_c['kept']} (rescued={curb_c['rescued']}) "
-            f"dropped={curb_c['dropped']} (of {curb_c['total_input']})"
+            f"dropped={curb_c['dropped']} (of {curb_c['total_input']}) "
+            f"total={curb_c['total_length_m']:.1f}m"
         )
+
+    def _coerce(k: str, v) -> float | int:
+        return float(v) if k == "total_length_m" else int(v)
+
     summary["metrics"]["stage6"] = {
-        "lane": {k: int(v) for k, v in lane_c.items()},
-        "curb": {k: int(v) for k, v in curb_c.items()},
+        "lane": {k: _coerce(k, v) for k, v in lane_c.items()},
+        "curb": {k: _coerce(k, v) for k, v in curb_c.items()},
     }
 
     return summary

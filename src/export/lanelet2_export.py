@@ -585,6 +585,7 @@ def _classify_lane_features(
         "area": 0,
         "dropped": 0,
         "total_input": len(lane_clusters),
+        "total_length_m": 0.0,
     }
     features: list[dict] = []
 
@@ -612,6 +613,7 @@ def _classify_lane_features(
                 }
             )
             counts[label] += 1
+            counts["total_length_m"] += float(stats["length"])
         elif label == "area":
             polygon = cluster_to_polygon(cluster, stats)
             features.append(
@@ -623,7 +625,9 @@ def _classify_lane_features(
                 }
             )
             counts["area"] += 1
+            counts["total_length_m"] += float(stats["length"])
 
+    counts["total_length_m"] = round(counts["total_length_m"], 2)
     return features, counts
 
 
@@ -646,6 +650,7 @@ def _classify_curb_features(
         "dropped": 0,
         "rescued": 0,
         "total_input": len(curb_clusters),
+        "total_length_m": 0.0,
     }
     features: list[dict] = []
 
@@ -674,9 +679,11 @@ def _classify_curb_features(
             }
         )
         counts["kept"] += 1
+        counts["total_length_m"] += float(stats["length"])
         if rescued:
             counts["rescued"] += 1
 
+    counts["total_length_m"] = round(counts["total_length_m"], 2)
     return features, counts
 
 
