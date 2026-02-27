@@ -9,12 +9,14 @@ used by the benchmark script.
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import yaml
 
+from src.benchmarks.timing import StageTimer
 from src.cache import STAGE_ORDER, LayeredCache
 from src.data.kitti_loader import KITTIDataset
 from src.export import export_lanelet2_osm
@@ -158,6 +160,7 @@ def run_pipeline_cached(
         "has_gt": gt_velo is not None,
         "cache_hits": {},
         "metrics": {},
+        "timing": {},
     }
 
     # --- Stage 2: LiDAR Odometry ---
@@ -170,6 +173,9 @@ def run_pipeline_cached(
         if verbose:
             print(f"  [cache hit] {len(poses)} poses loaded")
         summary["cache_hits"]["odometry"] = True
+        cached_m = cache.get_stage_metrics("odometry", cfg) if cache else None
+        if cached_m and "timing" in cached_m:
+            summary["timing"]["stage2"] = cached_m["timing"]
     else:
         kiss_cfg = cfg.get("kiss_icp", {})
         odom = KissICPOdometry(
@@ -177,7 +183,10 @@ def run_pipeline_cached(
             min_range=kiss_cfg.get("min_range", 5.0),
             voxel_size=kiss_cfg.get("voxel_size", 1.0),
         )
-        poses = odom.run(dataset)
+        timer_s2 = StageTimer("stage2_odometry")
+        with timer_s2:
+            poses = odom.run(dataset)
+        summary["timing"]["stage2"] = timer_s2.summary()
         if dataset.timestamps is not None:
             timestamps = np.asarray(dataset.timestamps[: len(poses)], dtype=np.float64)
         else:
@@ -193,7 +202,11 @@ def run_pipeline_cached(
             np.asarray(poses),
             timestamps,
             cfg,
-            metrics={"frame_count": len(poses), **odom_metrics},
+            metrics={
+                "frame_count": len(poses),
+                **odom_metrics,
+                "timing": summary["timing"].get("stage2", {}),
+            },
         )
 
     # Write human-readable kitti-format poses for observability.
@@ -210,25 +223,38 @@ def run_pipeline_cached(
         if verbose:
             print(f"  [cache hit] {len(optimized_poses)} optimized poses loaded")
         summary["cache_hits"]["optimized"] = True
+        cached_m = cache.get_stage_metrics("optimized", cfg) if cache else None
+        if cached_m and "timing" in cached_m:
+            summary["timing"]["stage3"] = cached_m["timing"]
     else:
         gtsam_cfg = cfg.get("gtsam", {})
         lc_cfg = cfg.get("loop_closure", {})
+        sc_cfg = lc_cfg.get("scan_context", {})
         detector = LoopClosureDetector(
             distance_threshold=lc_cfg.get("distance_threshold", 15.0),
             min_frame_gap=lc_cfg.get("min_frame_gap", 100),
             icp_fitness_threshold=lc_cfg.get("icp_fitness_threshold", 0.9),
+            mode=lc_cfg.get("mode", "v1"),
+            sc_num_rings=sc_cfg.get("num_rings", 20),
+            sc_num_sectors=sc_cfg.get("num_sectors", 60),
+            sc_max_range=sc_cfg.get("max_range", 80.0),
+            sc_distance_threshold=sc_cfg.get("distance_threshold", 0.4),
+            sc_top_k=sc_cfg.get("top_k", 10),
         )
-        closures = detector.detect(poses, dataset=dataset)
-        if verbose:
-            print(f"  Detected {len(closures)} loop closure(s)")
-        optimizer = PoseGraphOptimizer(
-            odom_sigmas=gtsam_cfg.get("odom_sigmas"),
-            prior_sigmas=gtsam_cfg.get("prior_sigmas"),
-        )
-        optimizer.build_graph(poses)
-        for i, j, rel_pose in closures:
-            optimizer.add_loop_closure(i, j, rel_pose)
-        optimized_poses = optimizer.optimize()
+        timer_s3 = StageTimer("stage3_optimization")
+        with timer_s3:
+            closures = detector.detect(poses, dataset=dataset)
+            if verbose:
+                print(f"  Detected {len(closures)} loop closure(s)")
+            optimizer = PoseGraphOptimizer(
+                odom_sigmas=gtsam_cfg.get("odom_sigmas"),
+                prior_sigmas=gtsam_cfg.get("prior_sigmas"),
+            )
+            optimizer.build_graph(poses)
+            for i, j, rel_pose in closures:
+                optimizer.add_loop_closure(i, j, rel_pose)
+            optimized_poses = optimizer.optimize()
+        summary["timing"]["stage3"] = timer_s3.summary()
         summary["cache_hits"]["optimized"] = False
         summary["loop_closures"] = len(closures)
 
@@ -244,6 +270,7 @@ def run_pipeline_cached(
                 "frame_count": len(optimized_poses),
                 "loop_closures": summary.get("loop_closures", 0),
                 **opt_metrics,
+                "timing": summary["timing"].get("stage3", {}),
             },
         )
 
@@ -260,6 +287,9 @@ def run_pipeline_cached(
         if verbose:
             print(f"  [cache hit] {len(fused_poses)} fused poses loaded")
         summary["cache_hits"]["fused"] = True
+        cached_m = cache.get_stage_metrics("fused", cfg) if cache else None
+        if cached_m and "timing" in cached_m:
+            summary["timing"]["stage4"] = cached_m["timing"]
     else:
         ekf_cfg = cfg.get("ekf", {})
         eskf = ESKF(
@@ -273,7 +303,10 @@ def run_pipeline_cached(
             ts_fuse = dataset.timestamps[: len(optimized_poses)]
         else:
             ts_fuse = np.arange(len(optimized_poses)) * 0.1
-        fused_poses = eskf.run(optimized_poses, ts_fuse)
+        timer_s4 = StageTimer("stage4_fusion")
+        with timer_s4:
+            fused_poses = eskf.run(optimized_poses, ts_fuse)
+        summary["timing"]["stage4"] = timer_s4.summary()
         summary["cache_hits"]["fused"] = False
 
     fused_metrics = _eval_metrics(fused_poses, gt_velo)
@@ -284,7 +317,11 @@ def run_pipeline_cached(
         cache.save_fused(
             np.asarray(fused_poses),
             cfg,
-            metrics={"frame_count": len(fused_poses), **fused_metrics},
+            metrics={
+                "frame_count": len(fused_poses),
+                **fused_metrics,
+                "timing": summary["timing"].get("stage4", {}),
+            },
         )
 
     fused_cam = transform_poses_to_camera_frame(fused_poses, Tr)
@@ -303,13 +340,19 @@ def run_pipeline_cached(
         if verbose:
             print(f"  [cache hit] master map loaded: {len(master_pcd.points):,} points")
         summary["cache_hits"]["map_master"] = True
+        cached_m = cache.get_stage_metrics("map_master", cfg) if cache else None
+        if cached_m and "timing" in cached_m:
+            summary["timing"]["stage4b"] = cached_m["timing"]
     else:
         builder = MapBuilder(
             voxel_size=master_voxel,
             max_range=float(mapping_cfg.get("max_range", 30.0)),
             downsample_every=int(mapping_cfg.get("downsample_every", 500)),
         )
-        master_pcd = builder.build(dataset, fused_poses)
+        timer_s4b = StageTimer("stage4b_map_master")
+        with timer_s4b:
+            master_pcd = builder.build(dataset, fused_poses)
+        summary["timing"]["stage4b"] = timer_s4b.summary()
         if verbose:
             print(f"  Built master map: {len(master_pcd.points):,} points")
         summary["cache_hits"]["map_master"] = False
@@ -318,7 +361,12 @@ def run_pipeline_cached(
 
     if cache is not None and not summary["cache_hits"]["map_master"]:
         cache.save_global_map_master(
-            master_pcd, cfg, metrics={"point_count": len(master_pcd.points)}
+            master_pcd,
+            cfg,
+            metrics={
+                "point_count": len(master_pcd.points),
+                "timing": summary["timing"].get("stage4b", {}),
+            },
         )
 
     # --- Stage 5: Working map + feature extraction ---
@@ -342,69 +390,70 @@ def run_pipeline_cached(
         road_pts_count = stage5_meta.get("road_point_count")
         lane_pts_count = stage5_meta.get("lane_candidate_count")
         curb_pts_count = stage5_meta.get("curb_point_count")
+        if stage5_meta.get("timing"):
+            summary["timing"]["stage5"] = stage5_meta["timing"]
     else:
-        working_pcd = MapBuilder.downsample_existing(master_pcd, working_voxel)
-        if verbose:
-            print(
-                f"  Downsampled to working voxel={working_voxel}: "
-                f"{len(working_pcd.points):,} points"
+        timer_s5 = StageTimer("stage5_features")
+        with timer_s5:
+            working_pcd = MapBuilder.downsample_existing(master_pcd, working_voxel)
+            if verbose:
+                print(
+                    f"  Downsampled to working voxel={working_voxel}: "
+                    f"{len(working_pcd.points):,} points"
+                )
+
+            xyz = np.asarray(working_pcd.points)
+            intensities = np.asarray(working_pcd.colors)[:, 0]
+
+            road_pts, road_int = extract_road_surface(
+                xyz,
+                intensities,
+                z_min=float(mapping_cfg.get("road_z_min", -2.0)),
+                z_max=float(mapping_cfg.get("road_z_max", -1.5)),
             )
+            road_pts_count = len(road_pts)
+            if verbose:
+                print(f"  Road surface points: {road_pts_count:,}")
 
-        xyz = np.asarray(working_pcd.points)
-        intensities = np.asarray(working_pcd.colors)[:, 0]
+            lane_pts = extract_lane_markings(
+                road_pts,
+                road_int,
+                intensity_threshold=float(mapping_cfg.get("intensity_threshold", 0.40)),
+            )
+            lane_pts_count = len(lane_pts)
+            if verbose:
+                print(f"  Lane marking candidates: {lane_pts_count:,}")
 
-        road_pts, road_int = extract_road_surface(
-            xyz,
-            intensities,
-            z_min=float(mapping_cfg.get("road_z_min", -2.0)),
-            z_max=float(mapping_cfg.get("road_z_max", -1.5)),
-        )
-        road_pts_count = len(road_pts)
-        if verbose:
-            print(f"  Road surface points: {road_pts_count:,}")
+            clusters = cluster_points(
+                lane_pts,
+                eps=float(mapping_cfg.get("dbscan_eps", 0.7)),
+                min_points=int(mapping_cfg.get("dbscan_min_points", 40)),
+            )
+            if verbose:
+                print(f"  Lane marking clusters: {len(clusters)}")
 
-        lane_pts = extract_lane_markings(
-            road_pts,
-            road_int,
-            intensity_threshold=float(mapping_cfg.get("intensity_threshold", 0.40)),
-        )
-        lane_pts_count = len(lane_pts)
-        if verbose:
-            print(f"  Lane marking candidates: {lane_pts_count:,}")
+            curb_pts = extract_curbs(
+                xyz,
+                grid_size=float(mapping_cfg.get("curb_grid_size", 0.30)),
+                z_min=float(mapping_cfg.get("curb_z_min", -2.0)),
+                z_max=float(mapping_cfg.get("curb_z_max", -1.2)),
+                height_min=float(mapping_cfg.get("curb_height_min", 0.10)),
+                height_max=float(mapping_cfg.get("curb_height_max", 0.25)),
+                road_z_top=float(mapping_cfg.get("curb_road_z_top", -1.55)),
+            )
+            curb_pts_count = int(curb_pts.shape[0])
+            if verbose:
+                print(f"  Curb candidate points: {curb_pts_count:,}")
 
-        clusters = cluster_points(
-            lane_pts,
-            eps=float(mapping_cfg.get("dbscan_eps", 0.7)),
-            min_points=int(mapping_cfg.get("dbscan_min_points", 40)),
-        )
-        if verbose:
-            print(f"  Lane marking clusters: {len(clusters)}")
-
-        # Curb detection: xy-grid height-step filter + DBSCAN. Runs on the
-        # full working point cloud (not the intensity-filtered lane
-        # candidates) because curbs are a geometric feature, not a
-        # reflectance one.
-        curb_pts = extract_curbs(
-            xyz,
-            grid_size=float(mapping_cfg.get("curb_grid_size", 0.30)),
-            z_min=float(mapping_cfg.get("curb_z_min", -2.0)),
-            z_max=float(mapping_cfg.get("curb_z_max", -1.2)),
-            height_min=float(mapping_cfg.get("curb_height_min", 0.10)),
-            height_max=float(mapping_cfg.get("curb_height_max", 0.25)),
-            road_z_top=float(mapping_cfg.get("curb_road_z_top", -1.55)),
-        )
-        curb_pts_count = int(curb_pts.shape[0])
-        if verbose:
-            print(f"  Curb candidate points: {curb_pts_count:,}")
-
-        curb_clusters = cluster_points(
-            curb_pts,
-            eps=float(mapping_cfg.get("curb_dbscan_eps", 0.5)),
-            min_points=int(mapping_cfg.get("curb_dbscan_min_points", 10)),
-            trim_k=float(mapping_cfg.get("curb_trim_k", 1.2)),
-        )
-        if verbose:
-            print(f"  Curb clusters: {len(curb_clusters)}")
+            curb_clusters = cluster_points(
+                curb_pts,
+                eps=float(mapping_cfg.get("curb_dbscan_eps", 0.5)),
+                min_points=int(mapping_cfg.get("curb_dbscan_min_points", 10)),
+                trim_k=float(mapping_cfg.get("curb_trim_k", 1.2)),
+            )
+            if verbose:
+                print(f"  Curb clusters: {len(curb_clusters)}")
+        summary["timing"]["stage5"] = timer_s5.summary()
         summary["cache_hits"]["stage5"] = False
 
     cluster_stats = _cluster_size_stats(clusters)
@@ -424,7 +473,10 @@ def run_pipeline_cached(
             clusters,
             cfg,
             curb_clusters=curb_clusters,
-            metrics=stage5_metrics,
+            metrics={
+                **stage5_metrics,
+                "timing": summary["timing"].get("stage5", {}),
+            },
         )
 
     # Human-readable results dir outputs (overwrite each run).
@@ -463,6 +515,11 @@ def run_pipeline_cached(
         "lane": {k: _coerce(k, v) for k, v in lane_c.items()},
         "curb": {k: _coerce(k, v) for k, v in curb_c.items()},
     }
+
+    # Dump timing data if any stages were actually computed (not cached)
+    if summary["timing"]:
+        timing_path = output_dir / f"latency_{sequence}.json"
+        timing_path.write_text(json.dumps(summary["timing"], indent=2) + "\n")
 
     return summary
 

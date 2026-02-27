@@ -182,6 +182,18 @@ class LayeredCache:
         self._save_metadata(meta)
 
     # ------------------------------------------------------------------
+    # Metadata queries
+    # ------------------------------------------------------------------
+
+    def get_stage_metrics(self, stage: str, config: dict) -> dict | None:
+        """Return stored metrics for *stage* if the cache entry is fresh."""
+        if not self._is_fresh(stage, config):
+            return None
+        meta = self._load_metadata()
+        entry = meta.get(stage)
+        return entry.get("metrics") if entry else None
+
+    # ------------------------------------------------------------------
     # Per-stage load/save
     # ------------------------------------------------------------------
 
