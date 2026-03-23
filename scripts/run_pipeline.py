@@ -184,8 +184,7 @@ def run_pipeline_cached(
             voxel_size=kiss_cfg.get("voxel_size", 1.0),
         )
         timer_s2 = StageTimer("stage2_odometry")
-        with timer_s2:
-            poses = odom.run(dataset)
+        poses = odom.run(dataset, timer=timer_s2)
         summary["timing"]["stage2"] = timer_s2.summary()
         if dataset.timestamps is not None:
             timestamps = np.asarray(dataset.timestamps[: len(poses)], dtype=np.float64)

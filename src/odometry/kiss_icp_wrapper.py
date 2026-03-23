@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 from evo.core import units
@@ -11,6 +12,9 @@ from evo.core.trajectory import PosePath3D
 from kiss_icp.config import KISSConfig
 from kiss_icp.config.config import DataConfig, MappingConfig
 from kiss_icp.kiss_icp import KissICP
+
+if TYPE_CHECKING:
+    from src.benchmarks.timing import StageTimer
 
 
 class KissICPOdometry:
@@ -37,7 +41,11 @@ class KissICPOdometry:
         self.min_range = min_range
         self.voxel_size = voxel_size
 
-    def run(self, dataset) -> list[np.ndarray]:
+    def run(
+        self,
+        dataset,
+        timer: StageTimer | None = None,
+    ) -> list[np.ndarray]:
         """Run KISS-ICP odometry on a dataset.
 
         Iterates through all frames, registers each point cloud, and
@@ -46,6 +54,11 @@ class KissICPOdometry:
         Args:
             dataset: Indexable object with len() support. Each item should be
                 a tuple where the first element is an (N, 4) or (N, 3) point cloud.
+            timer: Optional :class:`~src.benchmarks.timing.StageTimer`. When
+                provided, each ``icp.register_frame`` call is wrapped in a
+                timer lap so that ``timer.summary()`` reflects the per-frame
+                latency distribution (p50/p95/max) rather than a single
+                batch measurement.
 
         Returns:
             List of 4x4 pose matrices (one per frame).
@@ -61,8 +74,13 @@ class KissICPOdometry:
             pointcloud = dataset[idx][0]
             xyz = pointcloud[:, :3]  # strip reflectance if (N, 4)
             timestamps = np.zeros(len(xyz))  # no per-point timestamps in KITTI Odometry
-            icp.register_frame(xyz, timestamps)
-            poses.append(icp.last_pose.copy())
+            if timer is not None:
+                with timer:
+                    icp.register_frame(xyz, timestamps)
+                    poses.append(icp.last_pose.copy())
+            else:
+                icp.register_frame(xyz, timestamps)
+                poses.append(icp.last_pose.copy())
             if (idx + 1) % 100 == 0 or idx == n_frames - 1:
                 print(f"  Frame {idx + 1}/{n_frames}")
         return poses

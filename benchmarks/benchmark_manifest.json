@@ -1,0 +1,138 @@
+[
+  {
+    "run_id": "09c8a5d58c42",
+    "task": "SUP-01",
+    "git_sha": "c722fc82889133ff0f79b42b098e84414836470c",
+    "config_hash": "7a4d1460b937fd88",
+    "timestamp": "2026-04-10T05:14:40.444385+00:00",
+    "sequences": [
+      "00",
+      "05"
+    ],
+    "artifacts": [
+      "benchmarks/accuracy_table.csv",
+      "benchmarks/latency_table.csv",
+      "benchmarks/robustness_gnss_denied.csv"
+    ],
+    "metrics": {
+      "n_accuracy_rows": 6,
+      "n_gnss_rows": 2
+    }
+  },
+  {
+    "run_id": "3ee4b9b5fea0",
+    "task": "SUP-04",
+    "git_sha": "c722fc82889133ff0f79b42b098e84414836470c",
+    "config_hash": "b710e20979c7aece",
+    "timestamp": "2026-04-10T07:24:50.568258+00:00",
+    "sequences": [
+      "00"
+    ],
+    "artifacts": [
+      "benchmarks/tight_vs_loose/ape_compare.csv"
+    ],
+    "metrics": {
+      "n_rows": 4
+    }
+  },
+  {
+    "run_id": "a150a128c2b5",
+    "task": "SUP-04",
+    "git_sha": "c722fc82889133ff0f79b42b098e84414836470c",
+    "config_hash": "b710e20979c7aece",
+    "timestamp": "2026-04-10T07:37:45.089428+00:00",
+    "sequences": [
+      "00"
+    ],
+    "artifacts": [
+      "benchmarks/tight_vs_loose/ape_compare.csv"
+    ],
+    "metrics": {
+      "n_rows": 4
+    }
+  },
+  {
+    "run_id": "a8652e253d93",
+    "task": "SUP-04",
+    "git_sha": "c722fc82889133ff0f79b42b098e84414836470c",
+    "config_hash": "b710e20979c7aece",
+    "timestamp": "2026-04-10T07:44:32.059813+00:00",
+    "sequences": [
+      "00"
+    ],
+    "artifacts": [
+      "benchmarks/tight_vs_loose/ape_compare.csv"
+    ],
+    "metrics": {
+      "n_rows": 4
+    }
+  },
+  {
+    "run_id": "267b0c0541e6",
+    "task": "SUP-04",
+    "git_sha": "c722fc82889133ff0f79b42b098e84414836470c",
+    "config_hash": "b710e20979c7aece",
+    "timestamp": "2026-04-10T07:55:11.679272+00:00",
+    "sequences": [
+      "00"
+    ],
+    "artifacts": [
+      "benchmarks/tight_vs_loose/ape_compare.csv"
+    ],
+    "metrics": {
+      "n_rows": 4
+    }
+  },
+  {
+    "run_id": "1362bc167c60",
+    "task": "SUP-01",
+    "git_sha": "8efc9aacc4caa33bf89c8d3a7664d480e2b5315f",
+    "config_hash": "b710e20979c7aece",
+    "timestamp": "2026-04-10T14:59:18.247438+00:00",
+    "sequences": [
+      "00",
+      "05"
+    ],
+    "artifacts": [
+      "benchmarks/accuracy_table.csv",
+      "benchmarks/latency_table.csv",
+      "benchmarks/robustness_gnss_denied.csv"
+    ],
+    "metrics": {
+      "n_accuracy_rows": 12,
+      "n_latency_rows": 2,
+      "n_gnss_rows": 2,
+      "baselines_attempted": [
+        "own",
+        "hdl_graph_slam",
+        "fast_lio2",
+        "lio_sam"
+      ],
+      "per_sequence": {
+        "00": "11.5284",
+        "05": "3.2284"
+      },
+      "validation_pass": true,
+      "violations": []
+    }
+  },
+  {
+    "run_id": "4ce4d09350ae",
+    "task": "SUP-03",
+    "git_sha": "1589ad5f477b4ff537085e1c62f83764ac7f72c2",
+    "config_hash": "ca3d163bab055381",
+    "timestamp": "2026-04-10T22:59:21.764349+00:00",
+    "sequences": [
+      "00"
+    ],
+    "artifacts": [
+      "benchmarks/runtime_profile_baseline_200f.csv",
+      "benchmarks/runtime_profile_baseline_200f.md"
+    ],
+    "metrics": {
+      "top1_stage": "stage2",
+      "top1_pct": 59.04853789261206,
+      "total_s": 50.5811
+    }
+  }
+]
