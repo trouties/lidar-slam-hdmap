@@ -20,3 +20,10 @@ __all__ = [
     "load_timestamps",
     "load_velodyne_bin",
 ]
+
+try:
+    from src.data.nuscenes_loader import NuScenesDataset
+
+    __all__.append("NuScenesDataset")
+except ImportError:
+    pass
