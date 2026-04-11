@@ -22,7 +22,7 @@ __all__ = [
 ]
 
 try:
-    from src.data.nuscenes_loader import NuScenesDataset
+    from src.data.nuscenes_loader import NuScenesDataset  # noqa: F401
 
     __all__.append("NuScenesDataset")
 except ImportError:
