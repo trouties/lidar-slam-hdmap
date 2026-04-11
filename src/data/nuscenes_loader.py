@@ -69,13 +69,9 @@ class NuScenesDataset:
         scene = nusc.get("scene", scene_token)
 
         if keyframes_only:
-            filepaths, ego_pose_tokens, cs_tokens, timestamps_us = self._walk_keyframes(
-                nusc, scene
-            )
+            filepaths, ego_pose_tokens, cs_tokens, timestamps_us = self._walk_keyframes(nusc, scene)
         else:
-            filepaths, ego_pose_tokens, cs_tokens, timestamps_us = self._walk_sweeps(
-                nusc, scene
-            )
+            filepaths, ego_pose_tokens, cs_tokens, timestamps_us = self._walk_sweeps(nusc, scene)
 
         self._filepaths = filepaths
 

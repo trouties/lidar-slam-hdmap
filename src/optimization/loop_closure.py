@@ -120,7 +120,8 @@ class LoopClosureDetector:
 
             if j >= self.min_frame_gap and j % self.sc_query_stride == 0:
                 matches = db.query(
-                    sc, rk,
+                    sc,
+                    rk,
                     top_k=self.sc_top_k,
                     min_frame_gap=self.min_frame_gap,
                     current_frame=j,
