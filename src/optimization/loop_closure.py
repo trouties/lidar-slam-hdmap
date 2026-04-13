@@ -10,6 +10,7 @@ from __future__ import annotations
 import numpy as np
 import open3d as o3d
 
+from src.benchmarks.timing import StageTimer
 from src.optimization.scan_context import (
     ScanContextDatabase,
     compute_ring_key,
@@ -66,6 +67,14 @@ class LoopClosureDetector:
         self.sc_top_k = sc_top_k
         self.sc_query_stride = sc_query_stride
         self.sc_max_matches_per_query = sc_max_matches_per_query
+        # Sub-stage timers populated during detect(); read summary() after.
+        # Reset on every detect() call so reusing a detector across sequences
+        # does not accumulate stale measurements.
+        self.sc_query_timer = StageTimer("stage3_sc_query")
+        self.icp_verify_timer = StageTimer("stage3_icp_verify")
+        # Per-detect() downsample cache: frame_id -> downsampled Open3D cloud.
+        # Reset at the start of detect(). See _get_cached_downsampled_pcd.
+        self._downsample_cache: dict[int, o3d.geometry.PointCloud] = {}
 
     def detect_candidates(self, poses: list[np.ndarray]) -> list[tuple[int, int]]:
         """Find loop closure candidates based on pose distance (v1).
@@ -114,33 +123,72 @@ class LoopClosureDetector:
         candidates: list[tuple[int, int, float]] = []
 
         for j in range(n_frames):
+            # `sc_query_timer` covers the full per-frame SC cost: descriptor
+            # build, ring-key compute, query against db, and db.add for next
+            # iteration. The dataset I/O (dataset[j][0]) sits outside because
+            # it is owned by Stage 1 / data loader.
             pcl = dataset[j][0][:, :3]
-            sc = make_scan_context(pcl, self.sc_num_rings, self.sc_num_sectors, self.sc_max_range)
-            rk = compute_ring_key(sc)
-
-            if j >= self.min_frame_gap and j % self.sc_query_stride == 0:
-                matches = db.query(
-                    sc,
-                    rk,
-                    top_k=self.sc_top_k,
-                    min_frame_gap=self.min_frame_gap,
-                    current_frame=j,
+            with self.sc_query_timer:
+                sc = make_scan_context(
+                    pcl, self.sc_num_rings, self.sc_num_sectors, self.sc_max_range
                 )
-                n_matches = 0
-                for frame_idx, dist in matches:
-                    if dist < self.sc_distance_threshold:
-                        candidates.append((frame_idx, j, dist))
-                        n_matches += 1
-                        max_m = self.sc_max_matches_per_query
-                        if max_m > 0 and n_matches >= max_m:
-                            break
+                rk = compute_ring_key(sc)
 
-            db.add(sc, rk, j)
+                if j >= self.min_frame_gap and j % self.sc_query_stride == 0:
+                    matches = db.query(
+                        sc,
+                        rk,
+                        top_k=self.sc_top_k,
+                        min_frame_gap=self.min_frame_gap,
+                        current_frame=j,
+                    )
+                    n_matches = 0
+                    for frame_idx, dist in matches:
+                        if dist < self.sc_distance_threshold:
+                            candidates.append((frame_idx, j, dist))
+                            n_matches += 1
+                            max_m = self.sc_max_matches_per_query
+                            if max_m > 0 and n_matches >= max_m:
+                                break
+
+                db.add(sc, rk, j)
 
             if (j + 1) % 500 == 0:
                 print(f"  SC: processed {j + 1}/{n_frames} frames, {len(candidates)} candidates")
 
         return candidates
+
+    # Voxel size used when downsampling candidate point clouds before ICP.
+    # Lifted from an in-function hardcoded literal so that Stage 3 optimization
+    # iterations can try other values without touching the core verify path.
+    _ICP_DOWNSAMPLE_VOXEL: float = 1.0
+
+    def _build_downsampled_pcd(self, points: np.ndarray) -> o3d.geometry.PointCloud:
+        """Convert a raw (N, 3+) ndarray into a voxel-downsampled Open3D cloud.
+
+        This is the unit of work that the downsample cache amortizes across
+        the ~3× redundant access per unique frame (8285 candidates ↔ ~1200
+        unique frames on Seq 00 stride=1, giving ~6× downsample reduction).
+        """
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(points[:, :3])
+        return pcd.voxel_down_sample(voxel_size=self._ICP_DOWNSAMPLE_VOXEL)
+
+    def _get_cached_downsampled_pcd(self, frame_id: int, dataset) -> o3d.geometry.PointCloud:
+        """Return the downsampled cloud for ``frame_id``, building on miss.
+
+        The cache is per-``detect()``-call, keyed on the frame index. It is
+        reset at the start of :meth:`detect`. Cache misses read the raw
+        point cloud from ``dataset[frame_id]`` and run voxel downsampling;
+        hits return the stored Open3D cloud directly.
+        """
+        cached = self._downsample_cache.get(frame_id)
+        if cached is not None:
+            return cached
+        raw = dataset[frame_id][0][:, :3]
+        pcd = self._build_downsampled_pcd(raw)
+        self._downsample_cache[frame_id] = pcd
+        return pcd
 
     def verify_with_icp(
         self,
@@ -149,7 +197,11 @@ class LoopClosureDetector:
         initial_transform: np.ndarray,
         max_correspondence_distance: float = 2.0,
     ) -> tuple[np.ndarray, float] | None:
-        """Verify a loop closure candidate using ICP.
+        """Verify a loop closure candidate using ICP (array-input API).
+
+        Retained for callers that hold raw ndarrays and for unit tests.
+        The production Stage 3 path in :meth:`detect` uses the cached,
+        frame-id-keyed variant to avoid re-downsampling shared candidates.
 
         Args:
             source_points: (N, 3) source point cloud.
@@ -160,15 +212,37 @@ class LoopClosureDetector:
         Returns:
             (relative_pose, fitness) if fitness exceeds threshold, else None.
         """
-        src_pcd = o3d.geometry.PointCloud()
-        src_pcd.points = o3d.utility.Vector3dVector(source_points[:, :3])
+        src_pcd = self._build_downsampled_pcd(source_points)
+        tgt_pcd = self._build_downsampled_pcd(target_points)
 
-        tgt_pcd = o3d.geometry.PointCloud()
-        tgt_pcd.points = o3d.utility.Vector3dVector(target_points[:, :3])
+        result = o3d.pipelines.registration.registration_icp(
+            src_pcd,
+            tgt_pcd,
+            max_correspondence_distance,
+            initial_transform,
+            o3d.pipelines.registration.TransformationEstimationPointToPoint(),
+        )
 
-        # Downsample for speed
-        src_pcd = src_pcd.voxel_down_sample(voxel_size=1.0)
-        tgt_pcd = tgt_pcd.voxel_down_sample(voxel_size=1.0)
+        if result.fitness >= self.icp_fitness_threshold:
+            return result.transformation, result.fitness
+        return None
+
+    def _verify_cached(
+        self,
+        src_frame_id: int,
+        tgt_frame_id: int,
+        dataset,
+        initial_transform: np.ndarray,
+        max_correspondence_distance: float = 2.0,
+    ) -> tuple[np.ndarray, float] | None:
+        """Cached ICP verification used by :meth:`detect`.
+
+        Downsampled Open3D clouds are memoized per frame id within a single
+        :meth:`detect` call, so when many SC candidates share endpoints the
+        downsample work is paid once per frame instead of once per candidate.
+        """
+        src_pcd = self._get_cached_downsampled_pcd(src_frame_id, dataset)
+        tgt_pcd = self._get_cached_downsampled_pcd(tgt_frame_id, dataset)
 
         result = o3d.pipelines.registration.registration_icp(
             src_pcd,
@@ -197,6 +271,15 @@ class LoopClosureDetector:
         Returns:
             List of (i, j, relative_pose_4x4) loop closure constraints.
         """
+        # Reset sub-stage timers so each detect() call has a clean budget
+        # (callers read .summary() right after this method returns).
+        self.sc_query_timer = StageTimer("stage3_sc_query")
+        self.icp_verify_timer = StageTimer("stage3_icp_verify")
+        # Reset downsample cache — each detect() owns its own memoization
+        # table. This keeps memory bounded across sequences and avoids
+        # stale hits when poses change.
+        self._downsample_cache = {}
+
         # Gather candidates from selected mode(s)
         pairs: list[tuple[int, int]] = []
 
@@ -226,12 +309,14 @@ class LoopClosureDetector:
         closures = []
         for i, j in candidates:
             if dataset is not None:
-                # ICP verification
-                source_cloud = dataset[j][0][:, :3]
-                target_cloud = dataset[i][0][:, :3]
+                # ICP verification via cached downsampled clouds. The timer
+                # covers cache lookup + (on miss) cloud build + Open3D ICP.
+                # Cache hits return in microseconds, so the p50 of
+                # `stage3_icp_verify` naturally splits into two modes:
+                # "first touch for this frame" vs "cache hit".
                 initial = np.linalg.inv(poses[i]) @ poses[j]
-
-                result = self.verify_with_icp(source_cloud, target_cloud, initial)
+                with self.icp_verify_timer:
+                    result = self._verify_cached(j, i, dataset, initial)
                 if result is not None:
                     relative_pose, fitness = result
                     closures.append((i, j, relative_pose))

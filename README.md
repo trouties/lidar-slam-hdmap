@@ -76,7 +76,8 @@ Evaluated with [evo](https://github.com/MichaelGrupp/evo) APE (Absolute Pose Err
 | Loop closures detected (Seq 00 full) | 2,635 |
 | Loop closure precision | 0.967 |
 | Loop closure recall | 0.195 |
-| Stage 3 optimization speedup (SUP-02 → SUP-03) | 4.77× |
+| Stage 3 speedup (production config, SUP-03 round 2) | 2.19× (2866 s → 1311 s, Seq 00) |
+| Stage 3 ICP verify speedup (downsample cache) | 3.36× (p50 255 ms → 77 ms) |
 | GNSS denial drift (Seq 00, 150 m window) | 0.003 m/m |
 
 ### Cross-Dataset Validation (nuScenes)
@@ -122,7 +123,7 @@ All 10 nuScenes mini scenes pass the APE < 10 m acceptance threshold.
 
 - **5-layer deterministic cache** — Staged caching (odometry → optimized → fused → master map → features) enables 15-minute Stage 5 iteration cycles versus 2 h 20 min cold runs.
 
-- **Per-frame runtime profiling** — p50/p95/max latency distributions per stage. Identified Stage 3 as top bottleneck (57.4%) and achieved 4.77× speedup through Scan Context parameter optimization.
+- **Per-frame runtime profiling** — p50/p95/max latency distributions per stage, with Stage 3 `sc_query` / `icp_verify` / `graph_optimize` sub-stage breakdown. Under the production loop-closure config (`sc_query_stride=1`, 2,635 closures on Seq 00), ICP verification is the true bottleneck (76% of Stage 3); a per-frame downsample cache reduces it 3.36× (p50 255 ms → 77 ms) for a **2.19× Stage 3 speedup** with zero APE regression (10.577 m unchanged).
 
 - **GNSS denial resilience** — Drift rate 0.003 m/m over 150 m masked GNSS windows (Seq 00: 0.41 m total drift over 150.3 m denial segment).
 

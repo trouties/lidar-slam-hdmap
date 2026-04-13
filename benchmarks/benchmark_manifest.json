@@ -150,5 +150,77 @@
     "metrics": {
       "n_rows": 4
     }
+  },
+  {
+    "run_id": "61941b3f4178",
+    "task": "SUP-03",
+    "git_sha": "cecb26849c51cd6153ee2ee5bb39ad90ad98b84e",
+    "config_hash": "ca3d163bab055381",
+    "timestamp": "2026-04-12T23:58:22.482471+00:00",
+    "sequences": [
+      "00"
+    ],
+    "artifacts": [
+      "benchmarks/runtime_profile_smoke-stride1.csv",
+      "benchmarks/runtime_profile_smoke-stride1.md"
+    ],
+    "metrics": {
+      "top1_stage": "stage2",
+      "top1_pct": 48.10858174467015,
+      "total_s": 62.4267,
+      "label": "smoke-stride1",
+      "stage3_sc_query_s": 4.609,
+      "stage3_icp_verify_s": 0.0,
+      "stage3_graph_optimize_s": 0.0169,
+      "stage3_s": 4.7527
+    }
+  },
+  {
+    "run_id": "41e9b07b3f86",
+    "task": "SUP-03",
+    "git_sha": "cecb26849c51cd6153ee2ee5bb39ad90ad98b84e",
+    "config_hash": "ca3d163bab055381",
+    "timestamp": "2026-04-13T01:22:06.285166+00:00",
+    "sequences": [
+      "00"
+    ],
+    "artifacts": [
+      "benchmarks/runtime_profile_stride1-baseline.csv",
+      "benchmarks/runtime_profile_stride1-baseline.md"
+    ],
+    "metrics": {
+      "top1_stage": "stage3",
+      "top1_pct": 63.7847155691721,
+      "total_s": 4493.553,
+      "label": "stride1-baseline",
+      "stage3_sc_query_s": 608.8405,
+      "stage3_icp_verify_s": 2188.8028999999997,
+      "stage3_graph_optimize_s": 0.991,
+      "stage3_s": 2866.2
+    }
+  },
+  {
+    "run_id": "e4b425b1bca4",
+    "task": "SUP-03",
+    "git_sha": "cecb26849c51cd6153ee2ee5bb39ad90ad98b84e",
+    "config_hash": "ca3d163bab055381",
+    "timestamp": "2026-04-13T02:11:50.233239+00:00",
+    "sequences": [
+      "00"
+    ],
+    "artifacts": [
+      "benchmarks/runtime_profile_stride1-cache.csv",
+      "benchmarks/runtime_profile_stride1-cache.md"
+    ],
+    "metrics": {
+      "top1_stage": "stage3",
+      "top1_pct": 65.8305149303452,
+      "total_s": 1992.1743000000004,
+      "label": "stride1-cache",
+      "stage3_sc_query_s": 575.5138000000001,
+      "stage3_icp_verify_s": 650.5001,
+      "stage3_graph_optimize_s": 0.5173,
+      "stage3_s": 1311.4586000000002
+    }
   }
 ]

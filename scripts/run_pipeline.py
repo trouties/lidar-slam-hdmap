@@ -225,6 +225,11 @@ def run_pipeline_cached(
         cached_m = cache.get_stage_metrics("optimized", cfg) if cache else None
         if cached_m and "timing" in cached_m:
             summary["timing"]["stage3"] = cached_m["timing"]
+        # Restore sub-stage breakdown if it was stored when first computed.
+        if cached_m:
+            for sub_key in ("stage3_sc_query", "stage3_icp_verify", "stage3_graph_optimize"):
+                if sub_key in cached_m:
+                    summary["timing"][sub_key] = cached_m[sub_key]
     else:
         gtsam_cfg = cfg.get("gtsam", {})
         lc_cfg = cfg.get("loop_closure", {})
@@ -243,19 +248,27 @@ def run_pipeline_cached(
             sc_max_matches_per_query=sc_cfg.get("max_matches_per_query", 0),
         )
         timer_s3 = StageTimer("stage3_optimization")
+        timer_s3_go = StageTimer("stage3_graph_optimize")
         with timer_s3:
             closures = detector.detect(poses, dataset=dataset)
             if verbose:
                 print(f"  Detected {len(closures)} loop closure(s)")
-            optimizer = PoseGraphOptimizer(
-                odom_sigmas=gtsam_cfg.get("odom_sigmas"),
-                prior_sigmas=gtsam_cfg.get("prior_sigmas"),
-            )
-            optimizer.build_graph(poses)
-            for i, j, rel_pose in closures:
-                optimizer.add_loop_closure(i, j, rel_pose)
-            optimized_poses = optimizer.optimize()
+            with timer_s3_go:
+                optimizer = PoseGraphOptimizer(
+                    odom_sigmas=gtsam_cfg.get("odom_sigmas"),
+                    prior_sigmas=gtsam_cfg.get("prior_sigmas"),
+                )
+                optimizer.build_graph(poses)
+                for i, j, rel_pose in closures:
+                    optimizer.add_loop_closure(i, j, rel_pose)
+                optimized_poses = optimizer.optimize()
         summary["timing"]["stage3"] = timer_s3.summary()
+        # Sub-stage breakdown — sc_query and icp_verify accumulate per
+        # frame / per candidate inside the detector; graph_optimize is the
+        # one-shot optimizer block above.
+        summary["timing"]["stage3_sc_query"] = detector.sc_query_timer.summary()
+        summary["timing"]["stage3_icp_verify"] = detector.icp_verify_timer.summary()
+        summary["timing"]["stage3_graph_optimize"] = timer_s3_go.summary()
         summary["cache_hits"]["optimized"] = False
         summary["loop_closures"] = len(closures)
 
@@ -272,6 +285,9 @@ def run_pipeline_cached(
                 "loop_closures": summary.get("loop_closures", 0),
                 **opt_metrics,
                 "timing": summary["timing"].get("stage3", {}),
+                "stage3_sc_query": summary["timing"].get("stage3_sc_query", {}),
+                "stage3_icp_verify": summary["timing"].get("stage3_icp_verify", {}),
+                "stage3_graph_optimize": summary["timing"].get("stage3_graph_optimize", {}),
             },
         )
 
