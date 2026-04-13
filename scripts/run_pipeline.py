@@ -246,6 +246,7 @@ def run_pipeline_cached(
             sc_top_k=sc_cfg.get("top_k", 10),
             sc_query_stride=sc_cfg.get("query_stride", 1),
             sc_max_matches_per_query=sc_cfg.get("max_matches_per_query", 0),
+            icp_downsample_voxel=lc_cfg.get("icp_downsample_voxel", 1.0),
         )
         timer_s3 = StageTimer("stage3_optimization")
         timer_s3_go = StageTimer("stage3_graph_optimize")

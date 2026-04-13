@@ -40,6 +40,7 @@ class LoopClosureDetector:
         sc_top_k: int = 10,
         sc_query_stride: int = 1,
         sc_max_matches_per_query: int = 0,
+        icp_downsample_voxel: float = 1.0,
     ) -> None:
         """Initialize detector.
 
@@ -55,6 +56,12 @@ class LoopClosureDetector:
             sc_top_k: Number of ring-key candidates to re-rank per query.
             sc_query_stride: Query every N-th frame (1 = every frame).
             sc_max_matches_per_query: Max matches per query frame (0 = unlimited).
+            icp_downsample_voxel: Voxel size (m) used to downsample candidate
+                point clouds before ICP. Defaults to 1.0 m (the SUP-03
+                round-2 locked value on KITTI 64-beam Velodyne). Finer voxels
+                trade speed for registration accuracy; coarser voxels flip
+                the tradeoff. Cross-sensor work (e.g., nuScenes 32-beam)
+                typically wants a smaller value.
         """
         self.distance_threshold = distance_threshold
         self.min_frame_gap = min_frame_gap
@@ -67,6 +74,7 @@ class LoopClosureDetector:
         self.sc_top_k = sc_top_k
         self.sc_query_stride = sc_query_stride
         self.sc_max_matches_per_query = sc_max_matches_per_query
+        self.icp_downsample_voxel = icp_downsample_voxel
         # Sub-stage timers populated during detect(); read summary() after.
         # Reset on every detect() call so reusing a detector across sequences
         # does not accumulate stale measurements.
@@ -158,21 +166,17 @@ class LoopClosureDetector:
 
         return candidates
 
-    # Voxel size used when downsampling candidate point clouds before ICP.
-    # Lifted from an in-function hardcoded literal so that Stage 3 optimization
-    # iterations can try other values without touching the core verify path.
-    _ICP_DOWNSAMPLE_VOXEL: float = 1.0
-
     def _build_downsampled_pcd(self, points: np.ndarray) -> o3d.geometry.PointCloud:
         """Convert a raw (N, 3+) ndarray into a voxel-downsampled Open3D cloud.
 
-        This is the unit of work that the downsample cache amortizes across
-        the ~3× redundant access per unique frame (8285 candidates ↔ ~1200
+        Uses :attr:`icp_downsample_voxel` set at construction time. This is
+        the unit of work that the downsample cache amortizes across the
+        ~3× redundant access per unique frame (8285 candidates ↔ ~1200
         unique frames on Seq 00 stride=1, giving ~6× downsample reduction).
         """
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(points[:, :3])
-        return pcd.voxel_down_sample(voxel_size=self._ICP_DOWNSAMPLE_VOXEL)
+        return pcd.voxel_down_sample(voxel_size=self.icp_downsample_voxel)
 
     def _get_cached_downsampled_pcd(self, frame_id: int, dataset) -> o3d.geometry.PointCloud:
         """Return the downsampled cloud for ``frame_id``, building on miss.

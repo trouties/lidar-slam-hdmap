@@ -32,6 +32,9 @@ loop_closure:
   distance_threshold: 15.0
   min_frame_gap: 100
   icp_fitness_threshold: 0.9
+  # Voxel size (m) for pre-ICP downsample. SUP-03 round-2 locked for
+  # KITTI 64-beam Velodyne; nuScenes 32-beam typically wants ~0.5.
+  icp_downsample_voxel: 1.0
   scan_context:
     num_rings: 20
     num_sectors: 60

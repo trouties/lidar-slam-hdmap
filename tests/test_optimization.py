@@ -190,6 +190,34 @@ def test_detect_without_dataset():
         assert j > i
 
 
+def test_icp_downsample_voxel_configurable():
+    """icp_downsample_voxel from __init__ reaches the downsample call."""
+    # Dense 2m × 2m × 2m grid with 0.2 m steps ≈ 1000 points.
+    # Coarser voxel → fewer retained points; finer voxel → more.
+    axis = np.arange(-1.0, 1.0, 0.2)
+    grid = np.array([[x, y, z] for x in axis for y in axis for z in axis])
+
+    det_coarse = LoopClosureDetector(icp_downsample_voxel=1.0)
+    assert det_coarse.icp_downsample_voxel == 1.0
+    pcd_coarse = det_coarse._build_downsampled_pcd(grid)
+
+    det_fine = LoopClosureDetector(icp_downsample_voxel=0.25)
+    assert det_fine.icp_downsample_voxel == 0.25
+    pcd_fine = det_fine._build_downsampled_pcd(grid)
+
+    # Finer voxel must retain strictly more points on a dense input —
+    # proves the parameter actually flows through to voxel_down_sample.
+    assert len(pcd_fine.points) > len(pcd_coarse.points), (
+        f"Finer voxel should retain more points: "
+        f"coarse(voxel=1.0)={len(pcd_coarse.points)} "
+        f"fine(voxel=0.25)={len(pcd_fine.points)}"
+    )
+
+    # Default value sanity check
+    det_default = LoopClosureDetector()
+    assert det_default.icp_downsample_voxel == 1.0
+
+
 # ---------------------------------------------------------------------------
 # Tests: Integration (pose graph + loop closure)
 # ---------------------------------------------------------------------------
