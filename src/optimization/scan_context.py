@@ -128,7 +128,7 @@ class ScanContextDatabase:
         self._ring_keys.append(ring_key)
         self._frame_indices.append(frame_idx)
         self._tree_dirty = True
-    
+
     def _rebuild_tree(self) -> None:
         if self._ring_keys:
             self._tree = KDTree(np.array(self._ring_keys))

@@ -10,7 +10,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-from numpy.typing import NDArray
 
 
 def _quat_trans_to_se3(rotation: list[float], translation: list[float]) -> np.ndarray:

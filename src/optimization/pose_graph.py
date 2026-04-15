@@ -110,13 +110,9 @@ class PoseGraphOptimizer:
                 if edge_sigmas is not None and i < len(edge_sigmas):
                     s = edge_sigmas[i]
                     if s is not None:
-                        edge_noise = gtsam.noiseModel.Diagonal.Sigmas(
-                            np.array([*s[3:], *s[:3]])
-                        )
+                        edge_noise = gtsam.noiseModel.Diagonal.Sigmas(np.array([*s[3:], *s[:3]]))
 
-                self.graph.add(
-                    gtsam.BetweenFactorPose3(i - 1, i, gtsam.Pose3(delta), edge_noise)
-                )
+                self.graph.add(gtsam.BetweenFactorPose3(i - 1, i, gtsam.Pose3(delta), edge_noise))
 
     def add_loop_closure(
         self,
