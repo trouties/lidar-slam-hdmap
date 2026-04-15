@@ -20,11 +20,19 @@ mapping:
     fov_degree: 180
     det_range: 100.0
     extrinsic_est_en: false
-    # LiDAR-to-IMU extrinsic (approx identity for KITTI; refined from calib)
-    extrinsic_T: [0.0, 0.0, 0.0]
-    extrinsic_R: [1.0, 0.0, 0.0,
-                  0.0, 1.0, 0.0,
-                  0.0, 0.0, 1.0]
+    # LiDAR-to-IMU extrinsic, derived from KITTI Raw 2011_10_03/calib_imu_to_velo.txt
+    # via scripts/derive_baseline_extrinsic.py --date 2011_10_03. FAST-LIO2's
+    # extrinsic_R is R_imu_from_velo (rotates LiDAR vectors into the IMU frame)
+    # and extrinsic_T is the LiDAR origin expressed in the IMU frame, i.e.
+    # -R_imu_from_velo @ T_velo_from_imu. Previously these were hard-coded to
+    # identity / zero (no rotation, no translation) which ignored the ~0.8 m
+    # LiDAR-IMU offset present in the KITTI sensor rig (SUP-01 P0-1). Note:
+    # valid for 2011_10_03 drives only (Seq 00/01/02). For 2011_09_30 drives
+    # (Seq 04-10) re-derive once the calib zip is downloaded.
+    extrinsic_T: [ 8.105439e-01, -3.070544e-01,  8.027241e-01]
+    extrinsic_R: [ 9.999976e-01, -7.854027e-04,  2.024406e-03,
+                   7.553071e-04,  9.998898e-01,  1.482454e-02,
+                  -2.035826e-03, -1.482298e-02,  9.998881e-01]
 
 publish:
     path_en: true
