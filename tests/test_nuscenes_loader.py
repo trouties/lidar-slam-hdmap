@@ -143,6 +143,7 @@ def test_first_pose_is_identity(mock_nusc):
 
     ds = NuScenesDataset(mock_nusc, "scene_0")
     _, pose0, _ = ds[0]
+    pose0 = np.asarray(pose0)
     np.testing.assert_allclose(pose0, np.eye(4), atol=1e-9)
 
 

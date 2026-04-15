@@ -15,6 +15,29 @@ gtsam:
   loop_closure_sigmas: [0.05, 0.05, 0.05, 0.005, 0.005, 0.005]  # ICP-verified; tighter than odom
   gps_sigmas: [0.5, 0.5, 1.0]  # x, y, z
 
+sup07:
+  # LiDAR degeneracy detection (Zhang 2016 ICRA-inspired).
+  # When enabled=false, Stage 2/3 behavior is identical to legacy (optimized cache bytes unchanged).
+  enabled: false
+  # Analyzer parameters locked (tuned via tune_sup07, see pipeline-notes §17):
+  # voxel_size=0.3 / min_quality=0.5 / normal_k=15 raises Seq 01 p50 cond
+  # from 4.4 to 12.4 (>2×Seq 00 p95), passing SUP-07 criterion 1 acceptance.
+  max_correspondences: 5000       # per-frame NN sampling cap
+  normal_k: 15                    # neighborhood PCA normal estimation
+  max_nn_dist: 1.0                # m; drop NN correspondences beyond this distance
+  voxel_size: 0.3                 # m; source/target pre-downsample voxel
+  min_quality: 0.5                # PCA quality gate (l2-l1)/l3; planar normals only
+  # Degeneracy trigger threshold (fit from eval_sup07 baseline; equals Seq 00 p95)
+  cond_threshold: 5.514
+  # Degeneracy response: only inflate tx/ty/tz; keep rotation (KISS-ICP rotation remains reliable on highway)
+  sigma_inflation_factor: 10.0
+  # Hysteresis: EMA smoothing + minimum consecutive exceedance. Prevents the
+  # detector from degenerating into an always-on flag (Seq 01 went from
+  # 1078/1101=97.9% triggered to localized spikes after hysteresis). See
+  # pipeline-notes §19 "hysteresis" subsection.
+  ema_alpha: 0.3
+  min_consecutive: 5
+
 imu:
   # Conservative noise: LiDAR between-factors dominate; IMU adds velocity/bias regularization.
   # Tighter values (e.g. 0.3/0.03) cause divergence on KITTI Raw because:
@@ -52,55 +75,55 @@ ekf:
   measurement_noise_rot: 0.01
 
 mapping:
-  master_voxel_size: 0.10      # 主缓存体素 (m); Stage 4→5 边界, Stage 5 从此降采样到 voxel_size
-                               # 实测 voxel=0.05 在 seq 00 触发 OOM (13.7 GB 峰值 > 15 GB RAM)
-                               # 0.10 仍比 working 0.15 细, 峰值 ~2 GB 安全
-  voxel_size: 0.15             # Stage 5 工作体素 (m); 匹配车道线宽
-  max_range: 30.0              # 单帧点云最大距离过滤 (m); 远点 ICP 不确定
-  downsample_every: 500        # 每 N 帧触发一次增量 merge
-  road_z_min: -2.0             # 路面 z 下界 (Velodyne 帧, 地面约 -1.73m)
-  road_z_max: -1.5             # 路面 z 上界
-  intensity_threshold: 0.40    # 车道线反射率阈值 (KITTI reflectance in [0,1])
-  dbscan_eps: 0.7              # DBSCAN 聚类半径 (m); 桥接车道虚线内部碎片
-  dbscan_min_points: 40        # 最小核心邻域; 过滤道路反光噪点
-  curb_grid_size: 0.30         # 路缘检测 xy 网格边长 (m); 2× voxel_size 避免 snap 混叠
-  curb_z_min: -2.0             # 路缘 z 下界 (与 road_z_min 一致)
-  curb_z_max: -1.2             # 路缘 z 上界 (ground+0.5m, 捕获台阶上沿)
-  curb_height_min: 0.10        # 最小台阶高度 (m); 0.08 会踩 voxel=0.15 snap 噪声 (~0.03 σ)
-  curb_height_max: 0.25        # 最大台阶高度 (m); 更高归为墙/车/绿化带
-  curb_road_z_top: -1.55       # 路面上沿 z (m); cell 必须跨越此 z (zmin<=top<zmax) 才算 curb
-                               # 比 road_z_max=-1.5 低 5cm 以捕捉极矮 (~5cm) curb
-  curb_dbscan_eps: 0.6         # eps>=0.7 在稀疏候选上形成 2m 圆形 blob (lin~0.7)
-                               # eps=0.6 + mp=10 + trim_k=1.2 让 cluster 沿 curb 线延伸
-                               # 实测 (g=0.30 grid): good rate 21% vs eps=0.5 的 16%
-  curb_dbscan_min_points: 10   # 候选 ~2 pts/cell, mp=10 ≈ 5 cells (~1m 沿线)
-  curb_trim_k: 1.2             # MAD trim 比 lane (k=2.5) 紧, 把 blob 修成线
-                               # k=1.2 对应 ~88% Gaussian 保留率, 砍掉对角延伸点
+  master_voxel_size: 0.10      # master cache voxel (m); Stage 4→5 boundary, Stage 5 downsamples from here to voxel_size
+                               # Measured: voxel=0.05 triggers OOM on seq 00 (13.7 GB peak > 15 GB RAM)
+                               # 0.10 is still finer than working 0.15, peak ~2 GB stays safe
+  voxel_size: 0.15             # Stage 5 working voxel (m); matches lane marking width
+  max_range: 30.0              # per-frame point cloud max range filter (m); far points are ICP-uncertain
+  downsample_every: 500        # trigger incremental merge every N frames
+  road_z_min: -2.0             # road surface z lower bound (Velodyne frame, ground ~ -1.73 m)
+  road_z_max: -1.5             # road surface z upper bound
+  intensity_threshold: 0.40    # lane marking reflectance threshold (KITTI reflectance in [0,1])
+  dbscan_eps: 0.7              # DBSCAN cluster radius (m); bridges dashed lane marking fragments
+  dbscan_min_points: 40        # min core neighborhood; filters road reflection noise
+  curb_grid_size: 0.30         # curb detection xy grid cell size (m); 2× voxel_size to avoid snap aliasing
+  curb_z_min: -2.0             # curb z lower bound (matches road_z_min)
+  curb_z_max: -1.2             # curb z upper bound (ground + 0.5 m, captures step top edge)
+  curb_height_min: 0.10        # min step height (m); 0.08 hits voxel=0.15 snap noise (~0.03 σ)
+  curb_height_max: 0.25        # max step height (m); anything taller is classified as wall/vehicle/greenbelt
+  curb_road_z_top: -1.55       # road surface top z (m); cell must straddle this z (zmin<=top<zmax) to count as curb
+                               # set 5 cm below road_z_max=-1.5 to capture very short (~5 cm) curbs
+  curb_dbscan_eps: 0.6         # eps>=0.7 forms 2 m circular blob on sparse candidates (lin~0.7)
+                               # eps=0.6 + mp=10 + trim_k=1.2 makes clusters extend along the curb line
+                               # Measured (g=0.30 grid): good rate 21% vs 16% at eps=0.5
+  curb_dbscan_min_points: 10   # candidates ~2 pts/cell, mp=10 ≈ 5 cells (~1 m along line)
+  curb_trim_k: 1.2             # MAD trim tighter than lane (k=2.5), shapes blob into a line
+                               # k=1.2 corresponds to ~88% Gaussian retention, trims diagonal spread
 
 export:
-  lat0: 49.0                       # 假 WGS84 原点 (KITTI Karlsruhe 附近); seq 00 无真实 GPS
+  lat0: 49.0                       # synthetic WGS84 origin (near KITTI Karlsruhe); seq 00 has no real GPS
   lon0: 8.4
-  polyline_bin_size: 0.5           # m; 线状簇分箱宽度 (lane/curb 共用)
-  polyline_simplify_epsilon: 0.05  # m; RDP 简化容差; 0 禁用; 0.05 低于 Velodyne 噪声
-  lane:                            # 车道线分类阈值 (PCA 三档: thin/thick/area)
-    min_linearity: 0.75            # PCA xy linearity 下限
-    min_length: 1.0                # m; 主轴跨度低于此则丢为 noise
-    line_thin_max_thickness: 0.8   # m; 匹配 dbscan_eps=0.7 + voxel=0.15 自然 snap spread
-    line_thick_max_thickness: 2.0  # m; 超过此值归为 area (人行横道/路口涂装)
-  curb:                            # 路缘石分类阈值 (单一类别)
-                                   # 阈值依据 Stage 5 v4 实测 + stage6-curb-v1/v2/v3 benchmark
-                                   # v4 整体: median lin 0.91, median thk 0.46m, median len 1.4m
-    min_linearity: 0.75            # 与 lane 一致; "good" 0.80 过严, 长尾分布 lin 跨 0.85-0.97
-    min_length: 1.0                # m; v4 中位 1.4m, 1.5m 把一半 cluster 切掉; 1.0 是 polyline_bin 2x
-    max_thickness: 0.7             # m; "good" 上限 0.5 → 0.7; 吸收 v4 thickness 长尾 (max ~1.0m)
-    trim_k: 1.0                    # 二次 minor-axis MAD trim sigma 系数 (Stage 5 v4 已用 k=1.2 trim)
-                                   # 仅作用于一次 PCA 后 thickness 单一原因失败的 cluster
-                                   # k=1.0 比 v4 紧, 实测 seq 06/01/10 救回 12+4+3 个 thick-tail cluster
+  polyline_bin_size: 0.5           # m; linear-cluster binning width (shared by lane/curb)
+  polyline_simplify_epsilon: 0.05  # m; RDP simplification tolerance; 0 disables; 0.05 is below Velodyne noise
+  lane:                            # lane marking classification thresholds (3 PCA tiers: thin/thick/area)
+    min_linearity: 0.75            # PCA xy linearity lower bound
+    min_length: 1.0                # m; principal-axis span below this is dropped as noise
+    line_thin_max_thickness: 0.8   # m; matches natural snap spread of dbscan_eps=0.7 + voxel=0.15
+    line_thick_max_thickness: 2.0  # m; beyond this goes to area (crosswalks / intersection paint)
+  curb:                            # curb classification thresholds (single category)
+                                   # Thresholds based on Stage 5 v4 measurements + stage6-curb-v1/v2/v3 benchmark
+                                   # v4 overall: median lin 0.91, median thk 0.46 m, median len 1.4 m
+    min_linearity: 0.75            # same as lane; "good" 0.80 is too strict, long-tail lin spans 0.85-0.97
+    min_length: 1.0                # m; v4 median 1.4 m, 1.5 m would cut half the clusters; 1.0 is 2× polyline_bin
+    max_thickness: 0.7             # m; "good" upper bound raised 0.5 → 0.7; absorbs v4 thickness long tail (max ~1.0 m)
+    trim_k: 1.0                    # secondary minor-axis MAD trim sigma factor (Stage 5 v4 already applies k=1.2 trim)
+                                   # only applied to clusters that fail solely on thickness after the first PCA
+                                   # k=1.0 is tighter than v4; measured seq 06/01/10 recovers 12+4+3 thick-tail clusters
 
 cache:
   enabled: true
-  root: "cache/kitti"          # 相对仓库根; Stage 1-5 分层缓存
-                               # 见 src/cache/layered_cache.py
+  root: "cache/kitti"          # relative to repo root; Stage 1-5 layered cache
+                               # see src/cache/layered_cache.py
 
 output:
   dir: "results"

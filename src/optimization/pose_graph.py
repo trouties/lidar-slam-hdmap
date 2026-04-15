@@ -54,6 +54,7 @@ class PoseGraphOptimizer:
         poses: list[np.ndarray],
         prior_indices: list[int] | None = None,
         gt_poses: list[np.ndarray] | None = None,
+        edge_sigmas: list[list[float] | None] | None = None,
     ) -> None:
         """Build pose graph from sequential odometry poses.
 
@@ -68,6 +69,14 @@ class PoseGraphOptimizer:
             gt_poses: Ground-truth poses used as prior values when
                 *prior_indices* is given.  Falls back to estimated *poses*
                 if ``None``.
+            edge_sigmas: Optional per-edge noise override. Length must be
+                ``len(poses)``; entry ``i`` applies to the edge
+                ``(i-1, i)`` (entry ``0`` is unused). ``None`` entries
+                fall back to the global :attr:`odom_noise`. Sigma order is
+                the config ``[tx, ty, tz, rx, ry, rz]``; reordered to
+                GTSAM convention internally. Used by SUP-07 degeneracy
+                downgrade to inflate translation sigmas on frames where
+                LiDAR constraint rank collapses.
         """
         self.graph = gtsam.NonlinearFactorGraph()
         self.initial_values = gtsam.Values()
@@ -96,8 +105,17 @@ class PoseGraphOptimizer:
                 # Relative transform: delta = T_{i-1}^{-1} @ T_i
                 T_prev_inv = np.linalg.inv(poses[i - 1])
                 delta = T_prev_inv @ pose
+
+                edge_noise = self.odom_noise
+                if edge_sigmas is not None and i < len(edge_sigmas):
+                    s = edge_sigmas[i]
+                    if s is not None:
+                        edge_noise = gtsam.noiseModel.Diagonal.Sigmas(
+                            np.array([*s[3:], *s[:3]])
+                        )
+
                 self.graph.add(
-                    gtsam.BetweenFactorPose3(i - 1, i, gtsam.Pose3(delta), self.odom_noise)
+                    gtsam.BetweenFactorPose3(i - 1, i, gtsam.Pose3(delta), edge_noise)
                 )
 
     def add_loop_closure(

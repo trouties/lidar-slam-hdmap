@@ -126,7 +126,7 @@ def test_build_tight_graph_returns_correct_count():
     imu_ts = _uniform_timestamps(imu_n, dt=0.01)
     acc, gyro = _gravity_imu(imu_n)
 
-    opt_poses, bias_hist = build_tight_coupled_graph(
+    opt_poses, bias_hist, _ = build_tight_coupled_graph(
         poses=poses,
         imu_acc=acc,
         imu_gyro=gyro,
@@ -143,7 +143,7 @@ def test_build_tight_graph_pose_shape():
     acc, gyro = _gravity_imu(50)
     imu_ts = _uniform_timestamps(50, dt=0.01)
 
-    opt_poses, _ = build_tight_coupled_graph(
+    opt_poses, _, _ = build_tight_coupled_graph(
         poses=poses,
         imu_acc=acc,
         imu_gyro=gyro,
@@ -163,7 +163,7 @@ def test_build_tight_graph_straight_line_preserved():
     imu_ts = _uniform_timestamps(100, dt=0.01)
 
     # Use default (loose) IMU noise so LiDAR odometry dominates.
-    opt_poses, bias_hist = build_tight_coupled_graph(
+    opt_poses, bias_hist, _ = build_tight_coupled_graph(
         poses=poses,
         imu_acc=acc,
         imu_gyro=gyro,
@@ -184,7 +184,7 @@ def test_build_tight_graph_bias_bounded():
     acc, gyro = _gravity_imu(100)
     imu_ts = _uniform_timestamps(100, dt=0.01)
 
-    _, bias_hist = build_tight_coupled_graph(
+    _, bias_hist, _ = build_tight_coupled_graph(
         poses=poses,
         imu_acc=acc,
         imu_gyro=gyro,
@@ -211,7 +211,7 @@ def test_build_tight_graph_no_imu_fallback():
     acc, gyro = _gravity_imu(10)
     imu_ts = _uniform_timestamps(10, dt=0.1) + 100.0  # starts at t=100
 
-    opt_poses, bias_hist = build_tight_coupled_graph(
+    opt_poses, bias_hist, _ = build_tight_coupled_graph(
         poses=poses,
         imu_acc=acc,
         imu_gyro=gyro,
@@ -250,7 +250,7 @@ def test_build_tight_graph_with_loop_closure():
     loop_closures = [(n - 1, n // 2 - 1, rel_pose)]
 
     # Both with and without LC must succeed and return n poses.
-    opt_with_lc, _ = build_tight_coupled_graph(
+    opt_with_lc, _, _ = build_tight_coupled_graph(
         poses=poses_drifted,
         imu_acc=acc,
         imu_gyro=gyro,
@@ -258,7 +258,7 @@ def test_build_tight_graph_with_loop_closure():
         lidar_timestamps=lidar_ts,
         loop_closures=loop_closures,
     )
-    opt_without_lc, _ = build_tight_coupled_graph(
+    opt_without_lc, _, _ = build_tight_coupled_graph(
         poses=poses_drifted,
         imu_acc=acc,
         imu_gyro=gyro,
@@ -291,7 +291,7 @@ def test_build_tight_graph_noise_params_affect_result():
     gyro = np.zeros((80, 3))
     imu_ts = _uniform_timestamps(80, dt=0.01)
 
-    opt_loose_imu, _ = build_tight_coupled_graph(
+    opt_loose_imu, _, _ = build_tight_coupled_graph(
         poses=poses,
         imu_acc=acc,
         imu_gyro=gyro,
@@ -300,7 +300,7 @@ def test_build_tight_graph_noise_params_affect_result():
         accel_noise_sigma=5.0,  # very loose — IMU mostly ignored
         gyro_noise_sigma=0.5,
     )
-    opt_tight_imu, _ = build_tight_coupled_graph(
+    opt_tight_imu, _, _ = build_tight_coupled_graph(
         poses=poses,
         imu_acc=acc,
         imu_gyro=gyro,

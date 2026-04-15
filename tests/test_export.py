@@ -439,19 +439,22 @@ def test_export_lane_ways_carry_geometry_metadata_tags(tmp_path):
     assert len(ways) == 2
 
     for way in ways:
-        tag_dict = {t.get("k"): t.get("v") for t in way.findall("tag")}
+        tag_dict: dict[str, str] = {}
+        for t in way.findall("tag"):
+            k, v = t.get("k"), t.get("v")
+            if k is not None and v is not None:
+                tag_dict[k] = v
+
         assert "length_m" in tag_dict
         assert "thickness_m" in tag_dict
         assert "linearity" in tag_dict
         assert "vertex_count" in tag_dict
         assert "source_points" in tag_dict
-        # Sanity-check the parsed values.
         assert float(tag_dict["length_m"]) > 0
         assert float(tag_dict["thickness_m"]) >= 0
         assert 0.0 <= float(tag_dict["linearity"]) <= 1.0
         assert int(tag_dict["vertex_count"]) >= 2
         assert int(tag_dict["source_points"]) >= 3
-        # Lane ways do not carry the curb-only "rescued" tag.
         assert "rescued" not in tag_dict
 
 
@@ -473,7 +476,11 @@ def test_export_curb_way_rescued_tag_reflects_trim(tmp_path):
 
     rescued_flags = []
     for way in curb_ways:
-        tag_dict = {t.get("k"): t.get("v") for t in way.findall("tag")}
+        tag_dict: dict[str, str] = {}
+        for t in way.findall("tag"):
+            k, v = t.get("k"), t.get("v")
+            if k is not None and v is not None:
+                tag_dict[k] = v
         assert tag_dict.get("rescued") in {"true", "false"}
         rescued_flags.append(tag_dict["rescued"])
         # Geometry metadata also present on curbs.

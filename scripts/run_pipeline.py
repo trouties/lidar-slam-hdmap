@@ -29,6 +29,7 @@ from src.mapping import (
     extract_road_surface,
     save_features_geojson,
 )
+from src.odometry.degeneracy import DegeneracyAnalyzer, DegeneracyScore
 from src.odometry.kiss_icp_wrapper import (
     KissICPOdometry,
     evaluate_odometry,
@@ -69,6 +70,142 @@ def _log_metrics(label: str, metrics: dict[str, float], verbose: bool) -> None:
     print(f"  {label} APE Mean: {metrics.get('ape_mean', float('nan')):.4f} m")
     if "rpe_rmse" in metrics:
         print(f"  {label} RPE RMSE: {metrics['rpe_rmse']:.4f} m")
+
+
+def _scores_to_array(scores: list[DegeneracyScore]) -> np.ndarray:
+    """Serialize list[DegeneracyScore] to ``(N, 7)`` ndarray.
+
+    Columns: ``[cond, lambda_min, lambda_max, n_corr, eig_dx, eig_dy, eig_dz]``.
+    Null placeholder rows contain NaN in cond/lambda/eig and 0 in n_corr.
+    """
+    n = len(scores)
+    out = np.full((n, 7), np.nan, dtype=np.float64)
+    for i, s in enumerate(scores):
+        out[i, 0] = s.cond_number
+        out[i, 1] = s.lambda_min
+        out[i, 2] = s.lambda_max
+        out[i, 3] = float(s.n_corr)
+        if s.eig_direction is not None and s.eig_direction.shape == (3,):
+            out[i, 4:7] = s.eig_direction
+    return out
+
+
+def _degeneracy_stats(scores_arr: np.ndarray, threshold: float) -> dict[str, float]:
+    """Compute summary stats for the SUP-07 manifest entry."""
+    cond = scores_arr[:, 0]
+    finite = cond[np.isfinite(cond)]
+    if finite.size == 0:
+        return {"count": 0}
+    return {
+        "count": int(finite.size),
+        "p50": float(np.percentile(finite, 50)),
+        "p95": float(np.percentile(finite, 95)),
+        "p99": float(np.percentile(finite, 99)),
+        "max": float(finite.max()),
+        "n_above_threshold": int((finite > threshold).sum()),
+        "threshold": float(threshold),
+    }
+
+
+def _write_degeneracy_csv(
+    scores_arr: np.ndarray,
+    path: Path,
+    threshold: float,
+) -> None:
+    """Write per-frame degeneracy CSV with a ``degenerate`` flag column."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w") as f:
+        f.write(
+            "frame_idx,cond_number,lambda_min,lambda_max,n_corr,"
+            "eig_dx,eig_dy,eig_dz,degenerate\n"
+        )
+        for i in range(scores_arr.shape[0]):
+            cond = scores_arr[i, 0]
+            is_deg = 1 if (np.isfinite(cond) and cond > threshold) else 0
+            f.write(
+                f"{i},"
+                f"{cond:.6e},{scores_arr[i, 1]:.6e},{scores_arr[i, 2]:.6e},"
+                f"{int(scores_arr[i, 3])},"
+                f"{scores_arr[i, 4]:.6f},{scores_arr[i, 5]:.6f},{scores_arr[i, 6]:.6f},"
+                f"{is_deg}\n"
+            )
+
+
+def _apply_hysteresis(
+    cond: np.ndarray,
+    threshold: float,
+    ema_alpha: float,
+    min_consecutive: int,
+) -> np.ndarray:
+    """Return a boolean ``(N,)`` mask of sustained-degenerate frames.
+
+    Pipeline:
+      1. Causal EMA smoothing with ``ema_alpha`` — dampens per-frame noise.
+      2. Threshold comparison on the smoothed series.
+      3. Morphological erode (removes runs shorter than ``min_consecutive``)
+         + dilate (restores the original extent of surviving runs).
+
+    This turns the detector from an always-on flag (first SUP-07 run flagged
+    1078/1101 Seq 01 frames = 97.9%) into an actual *detector* that fires
+    only on sustained excursions above threshold.
+
+    NaN frames (null placeholders) are treated as below threshold.
+    """
+    from scipy.ndimage import binary_dilation, binary_erosion
+
+    n = cond.shape[0]
+    if n == 0:
+        return np.zeros(0, dtype=bool)
+
+    safe = np.where(np.isfinite(cond), cond, 0.0)
+    smoothed = np.copy(safe)
+    for i in range(1, n):
+        smoothed[i] = ema_alpha * safe[i] + (1.0 - ema_alpha) * smoothed[i - 1]
+
+    above = smoothed > threshold
+    struct = np.ones(max(min_consecutive, 1), dtype=bool)
+    eroded = binary_erosion(above, structure=struct, border_value=0)
+    sustained = binary_dilation(eroded, structure=struct, border_value=0)
+    return np.asarray(sustained, dtype=bool)
+
+
+def _build_edge_sigmas(
+    scores_arr: np.ndarray,
+    base_sigmas: list[float],
+    threshold: float,
+    inflation_factor: float,
+    ema_alpha: float = 0.3,
+    min_consecutive: int = 5,
+) -> list[list[float] | None]:
+    """Produce a per-edge sigma override list for SUP-07.
+
+    Inflates only the translation components ``[tx, ty, tz]`` on edges
+    whose arrival frame is flagged degenerate by the hysteresis detector
+    (see :func:`_apply_hysteresis`). Rotation sigmas remain unchanged
+    because KISS-ICP rotation is still well observed in tunnel scenes
+    (ground + side walls pin roll/pitch/yaw).
+    """
+    n = scores_arr.shape[0]
+    edges: list[list[float] | None] = [None] * n
+    if inflation_factor <= 1.0 or threshold <= 0 or n == 0:
+        return edges
+    sustained = _apply_hysteresis(
+        scores_arr[:, 0],
+        threshold=threshold,
+        ema_alpha=ema_alpha,
+        min_consecutive=min_consecutive,
+    )
+    for i in range(1, n):
+        if sustained[i]:
+            edges[i] = [
+                base_sigmas[0] * inflation_factor,
+                base_sigmas[1] * inflation_factor,
+                base_sigmas[2] * inflation_factor,
+                base_sigmas[3],
+                base_sigmas[4],
+                base_sigmas[5],
+            ]
+    return edges
 
 
 def _cluster_size_stats(clusters: list[np.ndarray]) -> dict[str, float]:
@@ -166,7 +303,26 @@ def run_pipeline_cached(
     # --- Stage 2: LiDAR Odometry ---
     if verbose:
         print(f"=== [{sequence}] Stage 2: KISS-ICP Odometry ===")
+
+    sup07_cfg = cfg.get("sup07", {}) or {}
+    sup07_enabled = bool(sup07_cfg.get("enabled", False))
+    degeneracy_scores_arr: np.ndarray | None = None
+
     odom_cached = cache.load_odometry(cfg) if cache else None
+    # When SUP-07 is enabled, we also need the degeneracy sidecar. If the
+    # odometry cache is fresh but the sidecar is missing/stale, we must
+    # re-run Stage 2 so we can compute scores with the *same* KISS-ICP
+    # state. This is the rare case because the sidecar is recomputed only
+    # when analyzer params change.
+    if sup07_enabled and cache is not None and odom_cached is not None:
+        loaded_scores = cache.load_degeneracy(cfg)
+        if loaded_scores is None:
+            if verbose:
+                print("  [sup07] degeneracy sidecar missing/stale — rerunning Stage 2")
+            odom_cached = None
+        else:
+            degeneracy_scores_arr = loaded_scores
+
     if odom_cached is not None:
         poses_arr, timestamps = odom_cached
         poses = [poses_arr[i] for i in range(poses_arr.shape[0])]
@@ -183,8 +339,25 @@ def run_pipeline_cached(
             min_range=kiss_cfg.get("min_range", 5.0),
             voxel_size=kiss_cfg.get("voxel_size", 1.0),
         )
+        analyzer: DegeneracyAnalyzer | None = None
+        if sup07_enabled:
+            analyzer = DegeneracyAnalyzer(
+                max_correspondences=int(sup07_cfg.get("max_correspondences", 5000)),
+                normal_k=int(sup07_cfg.get("normal_k", 10)),
+                max_nn_dist=float(sup07_cfg.get("max_nn_dist", 1.0)),
+                voxel_size=float(sup07_cfg.get("voxel_size", 0.5)),
+                min_quality=float(sup07_cfg.get("min_quality", 0.0)),
+            )
         timer_s2 = StageTimer("stage2_odometry")
-        poses = odom.run(dataset, timer=timer_s2)
+        result = odom.run(dataset, timer=timer_s2, degeneracy_analyzer=analyzer)
+        if analyzer is None:
+            assert not isinstance(result, tuple)
+            poses = result
+            scores_list: list[DegeneracyScore] = []
+        else:
+            assert isinstance(result, tuple)
+            poses, scores_list = result
+            degeneracy_scores_arr = _scores_to_array(scores_list)
         summary["timing"]["stage2"] = timer_s2.summary()
         if dataset.timestamps is not None:
             timestamps = np.asarray(dataset.timestamps[: len(poses)], dtype=np.float64)
@@ -207,6 +380,33 @@ def run_pipeline_cached(
                 "timing": summary["timing"].get("stage2", {}),
             },
         )
+        if sup07_enabled and degeneracy_scores_arr is not None:
+            cache.save_degeneracy(degeneracy_scores_arr, cfg)
+
+    # SUP-07: write per-frame degeneracy CSV + collect summary stats.
+    if sup07_enabled and degeneracy_scores_arr is not None:
+        threshold = float(sup07_cfg.get("cond_threshold", 100.0))
+        _write_degeneracy_csv(
+            degeneracy_scores_arr,
+            output_dir / f"degeneracy_{sequence}.csv",
+            threshold=threshold,
+        )
+        summary["metrics"]["degeneracy"] = _degeneracy_stats(
+            degeneracy_scores_arr, threshold
+        )
+        if verbose:
+            stats = summary["metrics"]["degeneracy"]
+            print(
+                "  [sup07] cond p50={p50:.2f} p95={p95:.2f} p99={p99:.2f} "
+                "max={mx:.2f} n_deg={nd}/{cnt}".format(
+                    p50=stats.get("p50", float("nan")),
+                    p95=stats.get("p95", float("nan")),
+                    p99=stats.get("p99", float("nan")),
+                    mx=stats.get("max", float("nan")),
+                    nd=stats.get("n_above_threshold", 0),
+                    cnt=stats.get("count", 0),
+                )
+            )
 
     # Write human-readable kitti-format poses for observability.
     poses_cam = transform_poses_to_camera_frame(poses, Tr)
@@ -250,6 +450,31 @@ def run_pipeline_cached(
         )
         timer_s3 = StageTimer("stage3_optimization")
         timer_s3_go = StageTimer("stage3_graph_optimize")
+        # SUP-07: build per-edge sigma override list from degeneracy scores.
+        edge_sigmas: list[list[float] | None] | None = None
+        if sup07_enabled and degeneracy_scores_arr is not None:
+            base_odom = gtsam_cfg.get("odom_sigmas") or [
+                0.1,
+                0.1,
+                0.1,
+                0.01,
+                0.01,
+                0.01,
+            ]
+            edge_sigmas = _build_edge_sigmas(
+                degeneracy_scores_arr,
+                base_sigmas=base_odom,
+                threshold=float(sup07_cfg.get("cond_threshold", 100.0)),
+                inflation_factor=float(sup07_cfg.get("sigma_inflation_factor", 1.0)),
+                ema_alpha=float(sup07_cfg.get("ema_alpha", 0.3)),
+                min_consecutive=int(sup07_cfg.get("min_consecutive", 5)),
+            )
+            n_downgraded = sum(1 for e in edge_sigmas if e is not None)
+            summary.setdefault("metrics", {}).setdefault("degeneracy", {})[
+                "n_edges_downgraded"
+            ] = n_downgraded
+            if verbose:
+                print(f"  [sup07] downgrading {n_downgraded} odometry edge(s)")
         with timer_s3:
             closures = detector.detect(poses, dataset=dataset)
             if verbose:
@@ -259,7 +484,7 @@ def run_pipeline_cached(
                     odom_sigmas=gtsam_cfg.get("odom_sigmas"),
                     prior_sigmas=gtsam_cfg.get("prior_sigmas"),
                 )
-                optimizer.build_graph(poses)
+                optimizer.build_graph(poses, edge_sigmas=edge_sigmas)
                 for i, j, rel_pose in closures:
                     optimizer.add_loop_closure(i, j, rel_pose)
                 optimized_poses = optimizer.optimize()

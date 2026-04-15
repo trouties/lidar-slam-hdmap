@@ -20,6 +20,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FuncAnimation, PillowWriter
+from matplotlib.colors import Normalize
+from matplotlib.figure import Figure
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 — registers 3d projection
 
 # ----------------------------------------------------------------------
@@ -126,7 +128,7 @@ def plot_trajectory_with_ellipsoids(
     metrics: dict | None = None,
     output_path: Path | None = None,
     title: str = "Keyframe Position Uncertainty",
-) -> plt.Figure:
+) -> Figure:
     """Static 3D plot: trajectory + ellipsoids at sampled frames.
 
     When ``sample_flags`` is provided, drift ellipsoids are drawn on the
@@ -191,7 +193,7 @@ def plot_trajectory_with_ellipsoids(
         vmin, vmax = float(log_traces.min()), float(log_traces.max())
         if vmax - vmin < 1e-6:
             vmax = vmin + 1.0
-        norm = plt.Normalize(vmin=vmin, vmax=vmax)
+        norm = Normalize(vmin=vmin, vmax=vmax)
         cmap = plt.get_cmap("viridis")
 
         for k, lt in zip(draw_frames, log_traces):
@@ -224,7 +226,7 @@ def plot_trajectory_with_ellipsoids(
     # Overlay the denial / tail trajectory segments AFTER ellipsoids
     # using thicker lines + scatter markers so they survive the 3D zorder
     # quirks and remain visible through the surfaces.
-    if ds is not None:
+    if ds is not None and de is not None:
         seg = trajectory[ds : de + 1]
         ax.plot(
             seg[:, 0],

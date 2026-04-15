@@ -113,6 +113,64 @@ def test_add_loop_closure_increases_graph():
     assert opt.graph_size == size_before + 1
 
 
+def test_edge_sigmas_none_matches_default():
+    """Passing edge_sigmas=None must produce exactly the same optimization result."""
+    poses = _make_straight_trajectory(6)
+    opt_a = PoseGraphOptimizer()
+    opt_a.build_graph(poses, edge_sigmas=None)
+    result_a = opt_a.optimize()
+
+    opt_b = PoseGraphOptimizer()
+    opt_b.build_graph(poses)
+    result_b = opt_b.optimize()
+
+    for pa, pb in zip(result_a, result_b):
+        np.testing.assert_array_almost_equal(pa, pb, decimal=10)
+
+
+def test_edge_sigmas_downgrade_relaxes_constraint():
+    """Inflating sigma on one edge should let the noisy initial value drift back.
+
+    Strategy: build a 5-pose straight trajectory, construct the graph from
+    CLEAN relative transforms so factors push toward clean positions, then
+    replace initial value for pose 2 with a noisy one. With edge (1, 2) at
+    normal sigma, optimization snaps pose 2 close to clean. With the same
+    edge inflated 100× (and edge (2, 3) also inflated so pose 2 isn't pulled
+    from the far side), pose 2 should stay closer to its noisy initial.
+    """
+    import gtsam
+
+    poses = _make_straight_trajectory(5)
+    noisy_init = [p.copy() for p in poses]
+    noisy_init[2][0, 3] += 0.5  # perturb middle pose forward
+
+    # Baseline: uniform sigmas
+    opt_a = PoseGraphOptimizer()
+    opt_a.build_graph(poses)
+    opt_a.initial_values = gtsam.Values()
+    for i, p in enumerate(noisy_init):
+        opt_a.initial_values.insert(i, gtsam.Pose3(p))
+    result_a = opt_a.optimize()
+
+    # Inflated: edges (1,2) and (2,3) translation sigma 100×
+    inflated: list[list[float] | None] = [None] * 5
+    inflated[2] = [10.0, 10.0, 10.0, 0.01, 0.01, 0.01]
+    inflated[3] = [10.0, 10.0, 10.0, 0.01, 0.01, 0.01]
+    opt_b = PoseGraphOptimizer()
+    opt_b.build_graph(poses, edge_sigmas=inflated)
+    opt_b.initial_values = gtsam.Values()
+    for i, p in enumerate(noisy_init):
+        opt_b.initial_values.insert(i, gtsam.Pose3(p))
+    result_b = opt_b.optimize()
+
+    err_a = abs(result_a[2][0, 3] - 2.0)  # clean middle pose is at x=2
+    err_b = abs(result_b[2][0, 3] - 2.0)
+    assert err_b > err_a, (
+        f"Inflated sigmas should relax the constraint on pose 2: "
+        f"baseline err={err_a:.4f}, inflated err={err_b:.4f}"
+    )
+
+
 def test_loop_closure_reduces_drift():
     """Loop closure should pull drifted initial values toward the constraint."""
     import gtsam

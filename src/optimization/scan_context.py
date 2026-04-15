@@ -128,10 +128,12 @@ class ScanContextDatabase:
         self._ring_keys.append(ring_key)
         self._frame_indices.append(frame_idx)
         self._tree_dirty = True
-
+    
     def _rebuild_tree(self) -> None:
         if self._ring_keys:
             self._tree = KDTree(np.array(self._ring_keys))
+        else:
+            self._tree = None
         self._tree_dirty = False
 
     def query(
@@ -142,37 +144,24 @@ class ScanContextDatabase:
         min_frame_gap: int = 100,
         current_frame: int = -1,
     ) -> list[tuple[int, float]]:
-        """Query the database for similar scan contexts.
-
-        Args:
-            sc: Query scan context.
-            ring_key: Query ring key.
-            top_k: Number of ring-key candidates to re-rank.
-            min_frame_gap: Minimum frame index difference.
-            current_frame: Current frame index for gap filtering.
-
-        Returns:
-            List of ``(frame_idx, sc_distance)`` sorted by distance,
-            excluding candidates within *min_frame_gap*.
-        """
         if not self._scs:
             return []
 
         if self._tree_dirty:
             self._rebuild_tree()
+        if self._tree is None:  # Guard: empty DB or rebuild produced no tree
+            return []
 
-        # Ring-key pre-filtering: query up to 3× top_k to allow gap filtering
         n_query = min(len(self._scs), top_k * 3)
         _, indices = self._tree.query(ring_key.reshape(1, -1), k=n_query)
-        indices = indices.flatten()
+        indices = np.asarray(indices).flatten()  # Ensure ndarray for downstream indexing
 
-        # Gap filtering + SC re-ranking
-        results = []
+        results: list[tuple[int, float]] = []
         for idx in indices:
-            fid = self._frame_indices[idx]
+            fid = self._frame_indices[int(idx)]  # Cast np.intp -> int for list indexing
             if current_frame >= 0 and abs(fid - current_frame) < min_frame_gap:
                 continue
-            dist = sc_distance(sc, self._scs[idx])
+            dist = sc_distance(sc, self._scs[int(idx)])
             results.append((fid, dist))
 
         results.sort(key=lambda x: x[1])

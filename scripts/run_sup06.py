@@ -327,6 +327,7 @@ def _run_tight(
         gyro_bias_sigma=imu_cfg.get("gyro_bias_sigma", 0.01),
         return_marginals=True,
     )
+    assert marginals_fn is not None  # narrow the type
     covariances = marginals_fn(sample_frames)
     return opt_poses, covariances
 
@@ -424,6 +425,9 @@ def main() -> None:
                 config, dataset, poses, gt_velo, prior_indices, sample_frames
             )
         else:
+            if imu_acc is None or imu_gyro is None or imu_ts_clip is None:
+                print(f"  [skip] tight mode requires IMU data, none available for {seq}")
+                continue
             opt_poses, covariances = _run_tight(
                 config, dataset, poses, gt_velo, lidar_ts,
                 imu_acc, imu_gyro, imu_ts_clip,

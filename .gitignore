@@ -15,6 +15,7 @@ external/baselines/*/devel/
 external/baselines/*/results/*.txt
 /tmp/baseline_*.log
 CLAUDE.md
+.vscode/
 
 # SUP-06 uncertainty viz — only ship the minimum artifacts needed
 # for README rendering (2 animated GIFs + JSON report + loose CSV).

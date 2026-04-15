@@ -68,9 +68,14 @@ def _config_subtree(stage: str, config: dict) -> dict:
     if stage == "odometry":
         return {"data": data_clean, "kiss_icp": config.get("kiss_icp", {})}
     if stage == "optimized":
+        # SUP-07 degeneracy downgrade changes per-edge noise models on the
+        # pose graph, so toggling sup07 must invalidate the optimized
+        # cache. We intentionally DO NOT put sup07 into the ``odometry``
+        # subtree because KISS-ICP registration itself is unaffected.
         return {
             "gtsam": config.get("gtsam", {}),
             "loop_closure": config.get("loop_closure", {}),
+            "sup07": config.get("sup07", {}),
         }
     if stage == "fused":
         return {"ekf": config.get("ekf", {})}
@@ -217,6 +222,78 @@ class LayeredCache:
             timestamps=np.asarray(timestamps),
         )
         self._write_metadata_entry("odometry", config, metrics)
+
+    # ------------------------------------------------------------------
+    # SUP-07 Degeneracy sidecar (independent of STAGE_ORDER)
+    # ------------------------------------------------------------------
+    #
+    # Stored alongside odometry because it is derived from the same KISS-ICP
+    # point-cloud stream. Not part of STAGE_ORDER because toggling it must
+    # not invalidate downstream stages by itself — that invalidation is
+    # handled by including ``sup07`` in the ``optimized`` subtree hash.
+    #
+    # Freshness check composes two conditions:
+    #   (a) the odometry cache for this config is fresh (poses byte-match)
+    #   (b) the sup07 **analyzer** subtree (not threshold/inflation) hashes
+    #       the same as the last write
+    # Changing threshold or inflation does NOT invalidate this sidecar.
+
+    _DEGENERACY_FILE = "degeneracy.npz"
+    _DEGENERACY_META_KEY = "degeneracy"
+
+    @staticmethod
+    def _sup07_analyzer_subtree(config: dict) -> dict:
+        sup07 = config.get("sup07", {}) or {}
+        return {
+            "max_correspondences": sup07.get("max_correspondences"),
+            "normal_k": sup07.get("normal_k"),
+            "max_nn_dist": sup07.get("max_nn_dist"),
+            "voxel_size": sup07.get("voxel_size"),
+            "min_quality": sup07.get("min_quality"),
+        }
+
+    def _degeneracy_is_fresh(self, config: dict) -> bool:
+        if not self._is_fresh("odometry", config):
+            return False
+        meta = self._load_metadata()
+        entry = meta.get(self._DEGENERACY_META_KEY)
+        if entry is None:
+            return False
+        own_hash = compute_hash(self._sup07_analyzer_subtree(config))
+        if entry.get("config_hash") != own_hash:
+            return False
+        if entry.get("odometry_hash") != self.hash_for("odometry", config):
+            return False
+        return (self.root / self._DEGENERACY_FILE).exists()
+
+    def load_degeneracy(self, config: dict) -> np.ndarray | None:
+        """Return ``(N, 7)`` per-frame degeneracy matrix or ``None``.
+
+        Columns: ``[cond_number, lambda_min, lambda_max, n_corr,
+        eig_dx, eig_dy, eig_dz]``. Null placeholder rows contain NaN.
+        """
+        if not self._degeneracy_is_fresh(config):
+            return None
+        data = np.load(self.root / self._DEGENERACY_FILE)
+        return data["scores"]
+
+    def save_degeneracy(self, scores: np.ndarray, config: dict) -> None:
+        """Write the SUP-07 degeneracy sidecar.
+
+        ``scores`` must be ``(N, 7)`` matching :meth:`load_degeneracy`.
+        """
+        self.root.mkdir(parents=True, exist_ok=True)
+        arr = np.asarray(scores, dtype=np.float64)
+        np.savez_compressed(self.root / self._DEGENERACY_FILE, scores=arr)
+        meta = self._load_metadata()
+        meta[self._DEGENERACY_META_KEY] = {
+            "config_hash": compute_hash(self._sup07_analyzer_subtree(config)),
+            "odometry_hash": self.hash_for("odometry", config),
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "params": self._sup07_analyzer_subtree(config),
+            "frame_count": int(arr.shape[0]),
+        }
+        self._save_metadata(meta)
 
     def load_optimized(self, config: dict) -> np.ndarray | None:
         if not self._is_fresh("optimized", config):

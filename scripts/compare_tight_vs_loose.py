@@ -81,7 +81,7 @@ def _run_tight(
     )
     closures = detector.detect(poses, dataset=dataset)
 
-    opt_poses, bias_history = build_tight_coupled_graph(
+    opt_poses, bias_history, _ = build_tight_coupled_graph(
         poses=poses,
         imu_acc=imu_acc,
         imu_gyro=imu_gyro,

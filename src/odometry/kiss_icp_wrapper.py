@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, overload
 
 import numpy as np
 from evo.core import units
@@ -12,6 +12,8 @@ from evo.core.trajectory import PosePath3D
 from kiss_icp.config import KISSConfig
 from kiss_icp.config.config import DataConfig, MappingConfig
 from kiss_icp.kiss_icp import KissICP
+
+from src.odometry.degeneracy import DegeneracyAnalyzer, DegeneracyScore
 
 if TYPE_CHECKING:
     from src.benchmarks.timing import StageTimer
@@ -41,11 +43,29 @@ class KissICPOdometry:
         self.min_range = min_range
         self.voxel_size = voxel_size
 
+    @overload
+    def run(
+        self,
+        dataset,
+        timer: StageTimer | None = ...,
+        degeneracy_analyzer: None = ...,
+    ) -> list[np.ndarray]: ...
+
+    @overload
+    def run(
+        self,
+        dataset,
+        timer: StageTimer | None = ...,
+        *,
+        degeneracy_analyzer: DegeneracyAnalyzer,
+    ) -> tuple[list[np.ndarray], list[DegeneracyScore]]: ...
+
     def run(
         self,
         dataset,
         timer: StageTimer | None = None,
-    ) -> list[np.ndarray]:
+        degeneracy_analyzer: DegeneracyAnalyzer | None = None,
+    ) -> list[np.ndarray] | tuple[list[np.ndarray], list[DegeneracyScore]]:
         """Run KISS-ICP odometry on a dataset.
 
         Iterates through all frames, registers each point cloud, and
@@ -59,16 +79,25 @@ class KissICPOdometry:
                 timer lap so that ``timer.summary()`` reflects the per-frame
                 latency distribution (p50/p95/max) rather than a single
                 batch measurement.
+            degeneracy_analyzer: Optional :class:`DegeneracyAnalyzer`. When
+                provided, the method returns ``(poses, scores)`` where
+                ``scores[i]`` is the degeneracy probe for frame ``i``
+                against frame ``i-1`` (frame 0 is a null placeholder).
+                When ``None``, the method returns ``poses`` only, matching
+                the original signature for all non-SUP-07 callers.
 
         Returns:
-            List of 4x4 pose matrices (one per frame).
+            ``list[poses]`` when ``degeneracy_analyzer`` is ``None``; else
+            ``(poses, scores)`` tuple.
         """
         config = KISSConfig(
             data=DataConfig(max_range=self.max_range, min_range=self.min_range, deskew=False),
             mapping=MappingConfig(voxel_size=self.voxel_size),
         )
         icp = KissICP(config)
-        poses = []
+        poses: list[np.ndarray] = []
+        scores: list[DegeneracyScore] = []
+        prev_world_xyz: np.ndarray | None = None
         n_frames = len(dataset)
         for idx in range(n_frames):
             pointcloud = dataset[idx][0]
@@ -81,9 +110,22 @@ class KissICPOdometry:
             else:
                 icp.register_frame(xyz, timestamps)
                 poses.append(icp.last_pose.copy())
+
+            if degeneracy_analyzer is not None:
+                pose = poses[-1]
+                curr_world = xyz @ pose[:3, :3].T + pose[:3, 3]
+                if prev_world_xyz is None:
+                    scores.append(DegeneracyScore.null())
+                else:
+                    scores.append(degeneracy_analyzer.analyze(curr_world, prev_world_xyz))
+                prev_world_xyz = curr_world
+
             if (idx + 1) % 100 == 0 or idx == n_frames - 1:
                 print(f"  Frame {idx + 1}/{n_frames}")
-        return poses
+
+        if degeneracy_analyzer is None:
+            return poses
+        return poses, scores
 
     @staticmethod
     def save_poses_kitti_format(poses: list[np.ndarray], path: str | Path) -> None:

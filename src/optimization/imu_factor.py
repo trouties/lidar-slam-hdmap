@@ -113,10 +113,11 @@ def build_tight_coupled_graph(
     accel_bias_sigma: float = 0.1,
     gyro_bias_sigma: float = 0.01,
     return_marginals: bool = False,
-) -> (
-    tuple[list[np.ndarray], list[np.ndarray]]
-    | tuple[list[np.ndarray], list[np.ndarray], "Callable[[list[int]], dict[int, np.ndarray]]"]
-):
+) -> tuple[
+    list[np.ndarray],
+    list[np.ndarray],
+    Callable[[list[int]], dict[int, np.ndarray]] | None,
+]:
     """Build and optimize a tightly-coupled LiDAR-IMU pose graph.
 
     Combines LiDAR BetweenFactors with IMU preintegration factors.
@@ -279,7 +280,7 @@ def build_tight_coupled_graph(
         bias_history.append(np.concatenate([b.accelerometer(), b.gyroscope()]))
 
     if not return_marginals:
-        return optimized_poses, bias_history
+        return optimized_poses, bias_history, None
 
     def marginals_fn(frame_indices: list[int]) -> dict[int, np.ndarray]:
         """Position marginal covariance (3x3) for each requested LiDAR frame.

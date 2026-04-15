@@ -121,7 +121,7 @@ def write_report(
             stage_totals[stage] = stage_totals.get(stage, 0) + float(r["total_ms"])
 
     total_all = sum(stage_totals.values())
-    top1_stage = max(stage_totals, key=stage_totals.get) if stage_totals else "N/A"
+    top1_stage = max(stage_totals, key=stage_totals.__getitem__) if stage_totals else "N/A"
     top1_pct = stage_totals.get(top1_stage, 0) / total_all * 100 if total_all > 0 else 0
 
     # Stage 3 sub-stage rollup (independent of stage3 total) — used to
@@ -182,7 +182,7 @@ def write_report(
         "|-------|---|----------|---|----------|----------|----------|",
     ]
 
-    for stage in sorted(stage_totals, key=stage_totals.get, reverse=True):
+    for stage in sorted(stage_totals, key=stage_totals.__getitem__, reverse=True):
         total_s = stage_totals[stage] / 1000
         pct = stage_totals[stage] / total_all * 100 if total_all > 0 else 0
         st = stage_stats.get(stage, {})
@@ -208,7 +208,7 @@ def write_report(
                 "|-----------|---|----------|------------|----------|----------|----------|",
             ]
         )
-        for sub in sorted(sub_totals, key=sub_totals.get, reverse=True):
+        for sub in sorted(sub_totals, key=sub_totals.__getitem__, reverse=True):
             total_s = sub_totals[sub] / 1000
             pct = stage3_sub_pct.get(sub, 0.0)
             st = stage_stats.get(sub, {})
