@@ -113,9 +113,10 @@ def build_tight_coupled_graph(
     accel_bias_sigma: float = 0.1,
     gyro_bias_sigma: float = 0.01,
     return_marginals: bool = False,
-) -> tuple[list[np.ndarray], list[np.ndarray]] | tuple[
-    list[np.ndarray], list[np.ndarray], "Callable[[list[int]], dict[int, np.ndarray]]"
-]:
+) -> (
+    tuple[list[np.ndarray], list[np.ndarray]]
+    | tuple[list[np.ndarray], list[np.ndarray], "Callable[[list[int]], dict[int, np.ndarray]]"]
+):
     """Build and optimize a tightly-coupled LiDAR-IMU pose graph.
 
     Combines LiDAR BetweenFactors with IMU preintegration factors.

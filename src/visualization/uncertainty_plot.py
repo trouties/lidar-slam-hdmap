@@ -150,8 +150,12 @@ def plot_trajectory_with_ellipsoids(
 
     # Trajectory backbone first (thin grey)
     ax.plot(
-        trajectory[:, 0], trajectory[:, 1], trajectory[:, 2],
-        color="0.55", lw=1.0, label="trajectory",
+        trajectory[:, 0],
+        trajectory[:, 1],
+        trajectory[:, 2],
+        color="0.55",
+        lw=1.0,
+        label="trajectory",
     )
 
     # Pick which samples to draw as ellipsoids — skip priors and subsample
@@ -159,7 +163,7 @@ def plot_trajectory_with_ellipsoids(
         non_prior_frames = list(sample_frames)
     else:
         non_prior_frames = [k for k in sample_frames if not sample_flags[k][0]]
-    draw_frames = non_prior_frames[::max(1, ellipsoid_stride)]
+    draw_frames = non_prior_frames[:: max(1, ellipsoid_stride)]
 
     # FORCE include peak frames so bulges are anchored regardless of stride
     forced = set()
@@ -192,12 +196,21 @@ def plot_trajectory_with_ellipsoids(
 
         for k, lt in zip(draw_frames, log_traces):
             X, Y, Z = cov_to_ellipsoid_mesh(
-                trajectory[k], covariances[k], n_std=n_std, display_scale=display_scale,
+                trajectory[k],
+                covariances[k],
+                n_std=n_std,
+                display_scale=display_scale,
             )
             color = cmap(norm(lt))
             ax.plot_surface(
-                X, Y, Z,
-                color=color, alpha=0.55, linewidth=0, antialiased=True, shade=True,
+                X,
+                Y,
+                Z,
+                color=color,
+                alpha=0.55,
+                linewidth=0,
+                antialiased=True,
+                shade=True,
             )
 
         sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
@@ -214,22 +227,44 @@ def plot_trajectory_with_ellipsoids(
     if ds is not None:
         seg = trajectory[ds : de + 1]
         ax.plot(
-            seg[:, 0], seg[:, 1], seg[:, 2],
-            color="crimson", lw=4.0, alpha=0.95, label="GNSS denied",
+            seg[:, 0],
+            seg[:, 1],
+            seg[:, 2],
+            color="crimson",
+            lw=4.0,
+            alpha=0.95,
+            label="GNSS denied",
         )
         ax.scatter(
-            seg[::5, 0], seg[::5, 1], seg[::5, 2],
-            color="crimson", s=12, alpha=1.0, zorder=10, depthshade=False,
+            seg[::5, 0],
+            seg[::5, 1],
+            seg[::5, 2],
+            color="crimson",
+            s=12,
+            alpha=1.0,
+            zorder=10,
+            depthshade=False,
         )
     if tail_start is not None and tail_start < n:
         seg_t = trajectory[tail_start:]
         ax.plot(
-            seg_t[:, 0], seg_t[:, 1], seg_t[:, 2],
-            color="goldenrod", lw=3.5, alpha=0.95, label="end tail",
+            seg_t[:, 0],
+            seg_t[:, 1],
+            seg_t[:, 2],
+            color="goldenrod",
+            lw=3.5,
+            alpha=0.95,
+            label="end tail",
         )
         ax.scatter(
-            seg_t[::3, 0], seg_t[::3, 1], seg_t[::3, 2],
-            color="goldenrod", s=12, alpha=1.0, zorder=10, depthshade=False,
+            seg_t[::3, 0],
+            seg_t[::3, 1],
+            seg_t[::3, 2],
+            color="goldenrod",
+            s=12,
+            alpha=1.0,
+            zorder=10,
+            depthshade=False,
         )
 
     # Annotate peak ellipsoids in 2D axes coordinates so they ALWAYS render
@@ -238,19 +273,19 @@ def plot_trajectory_with_ellipsoids(
     label_lines: list[str] = []
     if peak_in_denial_frame is not None:
         peak_trace = float(np.trace(covariances[peak_in_denial_frame]))
-        label_lines.append(
-            f"peak (denial): frame {peak_in_denial_frame}, {peak_trace:.2f} m²"
-        )
+        label_lines.append(f"peak (denial): frame {peak_in_denial_frame}, {peak_trace:.2f} m²")
     if peak_in_tail_frame is not None and peak_in_tail_frame != peak_in_denial_frame:
         tail_trace = float(np.trace(covariances[peak_in_tail_frame]))
-        label_lines.append(
-            f"tail edge:     frame {peak_in_tail_frame}, {tail_trace:.2f} m²"
-        )
+        label_lines.append(f"tail edge:     frame {peak_in_tail_frame}, {tail_trace:.2f} m²")
     if label_lines:
         ax.text2D(
-            0.02, 0.92, "\n".join(label_lines),
+            0.02,
+            0.92,
+            "\n".join(label_lines),
             transform=ax.transAxes,
-            fontsize=9, weight="bold", color="black",
+            fontsize=9,
+            weight="bold",
+            color="black",
             verticalalignment="top",
             bbox=dict(
                 boxstyle="round,pad=0.4",
@@ -329,7 +364,13 @@ def animate_uncertainty_evolution(
     # the right-hand 2D panel — matplotlib's default 1x2 subplot spacing is
     # too tight once the 3D axes claim their projection margin.
     gs = fig.add_gridspec(
-        1, 2, wspace=0.32, left=0.04, right=0.97, top=0.88, bottom=0.12,
+        1,
+        2,
+        wspace=0.32,
+        left=0.04,
+        right=0.97,
+        top=0.88,
+        bottom=0.12,
     )
     ax3d = fig.add_subplot(gs[0, 0], projection="3d")
     ax2d = fig.add_subplot(gs[0, 1])
@@ -338,28 +379,53 @@ def animate_uncertainty_evolution(
     if tail_start is None:
         tail_start = n
     ax3d.plot(
-        trajectory[:, 0], trajectory[:, 1], trajectory[:, 2],
-        color="0.55", lw=1.0,
+        trajectory[:, 0],
+        trajectory[:, 1],
+        trajectory[:, 2],
+        color="0.55",
+        lw=1.0,
     )
     if de >= ds:
         seg_d = trajectory[ds : de + 1]
         ax3d.plot(
-            seg_d[:, 0], seg_d[:, 1], seg_d[:, 2],
-            color="crimson", lw=4.0, alpha=0.95, label="GNSS denied",
+            seg_d[:, 0],
+            seg_d[:, 1],
+            seg_d[:, 2],
+            color="crimson",
+            lw=4.0,
+            alpha=0.95,
+            label="GNSS denied",
         )
         ax3d.scatter(
-            seg_d[::5, 0], seg_d[::5, 1], seg_d[::5, 2],
-            color="crimson", s=10, alpha=1.0, zorder=10, depthshade=False,
+            seg_d[::5, 0],
+            seg_d[::5, 1],
+            seg_d[::5, 2],
+            color="crimson",
+            s=10,
+            alpha=1.0,
+            zorder=10,
+            depthshade=False,
         )
     if tail_start < n:
         seg_t = trajectory[tail_start:]
         ax3d.plot(
-            seg_t[:, 0], seg_t[:, 1], seg_t[:, 2],
-            color="goldenrod", lw=3.5, alpha=0.95, label="end tail",
+            seg_t[:, 0],
+            seg_t[:, 1],
+            seg_t[:, 2],
+            color="goldenrod",
+            lw=3.5,
+            alpha=0.95,
+            label="end tail",
         )
         ax3d.scatter(
-            seg_t[::3, 0], seg_t[::3, 1], seg_t[::3, 2],
-            color="goldenrod", s=10, alpha=1.0, zorder=10, depthshade=False,
+            seg_t[::3, 0],
+            seg_t[::3, 1],
+            seg_t[::3, 2],
+            color="goldenrod",
+            s=10,
+            alpha=1.0,
+            zorder=10,
+            depthshade=False,
         )
     _set_equal_aspect_3d(ax3d, trajectory)
     ax3d.set_xlabel("x [m]")
@@ -391,15 +457,22 @@ def animate_uncertainty_evolution(
     non_prior_traces_np = np.array(non_prior_traces)[order]
 
     ax2d.semilogy(
-        non_prior_frames_np, non_prior_traces_np,
-        color="steelblue", lw=1.5, label="non-prior drift",
+        non_prior_frames_np,
+        non_prior_traces_np,
+        color="steelblue",
+        lw=1.5,
+        label="non-prior drift",
     )
     # Prior anchors as small green dots
     prior_frames, prior_traces = buckets["prior"]
     if prior_frames:
         ax2d.scatter(
-            prior_frames, prior_traces,
-            s=14, color="forestgreen", marker="o", alpha=0.7,
+            prior_frames,
+            prior_traces,
+            s=14,
+            color="forestgreen",
+            marker="o",
+            alpha=0.7,
             label="GNSS prior anchor",
         )
 
@@ -413,13 +486,14 @@ def animate_uncertainty_evolution(
     # definition goes in a small footer annotation below.
     if pre_denial_trace and np.isfinite(pre_denial_trace) and pre_denial_trace > 0:
         ax2d.axhline(
-            pre_denial_trace, color="gray", ls="--", lw=1.0,
+            pre_denial_trace,
+            color="gray",
+            ls="--",
+            lw=1.0,
             label=f"baseline = {pre_denial_trace:.2e} m²",
         )
-        ax2d.axhline(2.0 * pre_denial_trace, color="orange", ls="--", lw=1.0,
-                     label="2× baseline")
-        ax2d.axhline(1.5 * pre_denial_trace, color="green", ls="--", lw=1.0,
-                     label="1.5× baseline")
+        ax2d.axhline(2.0 * pre_denial_trace, color="orange", ls="--", lw=1.0, label="2× baseline")
+        ax2d.axhline(1.5 * pre_denial_trace, color="green", ls="--", lw=1.0, label="1.5× baseline")
 
     ax2d.set_xlabel("frame index")
     ax2d.set_ylabel(r"$\mathrm{tr}(\Sigma_\mathrm{pos})$ [m$^2$]")
@@ -428,12 +502,21 @@ def animate_uncertainty_evolution(
 
     if baseline_window_label:
         ax2d.text(
-            0.99, 0.02, f"baseline = {baseline_window_label}",
+            0.99,
+            0.02,
+            f"baseline = {baseline_window_label}",
             transform=ax2d.transAxes,
-            fontsize=6, color="0.35",
-            ha="right", va="bottom",
-            bbox=dict(boxstyle="round,pad=0.25", facecolor="white",
-                      edgecolor="0.7", linewidth=0.6, alpha=0.85),
+            fontsize=6,
+            color="0.35",
+            ha="right",
+            va="bottom",
+            bbox=dict(
+                boxstyle="round,pad=0.25",
+                facecolor="white",
+                edgecolor="0.7",
+                linewidth=0.6,
+                alpha=0.85,
+            ),
         )
 
     # Dynamic artists
@@ -453,9 +536,7 @@ def animate_uncertainty_evolution(
         keep_idx.add(0)
         keep_idx.add(len(anim_frames) - 1)
         if sample_flags is not None:
-            in_denial_in_anim = [
-                i for i, k in enumerate(anim_frames) if sample_flags[k][1]
-            ]
+            in_denial_in_anim = [i for i, k in enumerate(anim_frames) if sample_flags[k][1]]
             if in_denial_in_anim:
                 trs = [float(np.trace(covariances[anim_frames[i]])) for i in in_denial_in_anim]
                 peak_local = in_denial_in_anim[int(np.argmax(trs))]
@@ -479,18 +560,25 @@ def animate_uncertainty_evolution(
         while current_surface:
             current_surface.pop().remove()
         X, Y, Z = cov_to_ellipsoid_mesh(
-            trajectory[k], covariances[k], n_std=n_std, display_scale=display_scale,
+            trajectory[k],
+            covariances[k],
+            n_std=n_std,
+            display_scale=display_scale,
         )
         surf = ax3d.plot_surface(
-            X, Y, Z, color="darkorange", alpha=0.7, linewidth=0, antialiased=True,
+            X,
+            Y,
+            Z,
+            color="darkorange",
+            alpha=0.7,
+            linewidth=0,
+            antialiased=True,
         )
         current_surface.append(surf)
         current_marker.set_data([k], [anim_traces[k]])
         return [surf, current_marker]
 
-    anim = FuncAnimation(
-        fig, update, frames=len(anim_frames), interval=1000.0 / fps, blit=False
-    )
+    anim = FuncAnimation(fig, update, frames=len(anim_frames), interval=1000.0 / fps, blit=False)
 
     writer = PillowWriter(fps=fps)
     anim.save(str(output_path), writer=writer)
