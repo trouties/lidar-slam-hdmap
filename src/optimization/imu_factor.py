@@ -113,6 +113,7 @@ def build_tight_coupled_graph(
     accel_bias_sigma: float = 0.1,
     gyro_bias_sigma: float = 0.01,
     return_marginals: bool = False,
+    edge_sigmas: list[list[float] | np.ndarray | None] | None = None,
 ) -> tuple[
     list[np.ndarray],
     list[np.ndarray],
@@ -139,6 +140,13 @@ def build_tight_coupled_graph(
         gyro_noise_sigma: Gyroscope noise σ (rad/s).
         accel_bias_sigma: Accelerometer bias random walk σ.
         gyro_bias_sigma: Gyroscope bias random walk σ.
+        edge_sigmas: Optional per-edge override for LiDAR BetweenFactors,
+            mirroring :meth:`PoseGraphOptimizer.build_graph` semantics so
+            the SUP-07 degeneracy downgrade (uniform or directional) also
+            applies under the tight-coupled path. Entry ``i`` overrides
+            the edge ``(i-1, i)`` (entry ``0`` is unused). Accepts either
+            a 6-list ``[tx,ty,tz,rx,ry,rz]`` (diagonal) or a ``(6, 6)``
+            ndarray in GTSAM tangent order (full covariance).
 
     Returns:
         Tuple of (optimized_poses, bias_history).
@@ -217,11 +225,21 @@ def build_tight_coupled_graph(
     bias_prior_noise = gtsam.noiseModel.Isotropic.Sigma(6, 0.1)
     graph.add(gtsam.PriorFactorConstantBias(B(0), zero_bias, bias_prior_noise))
 
+    # Import inside the function to avoid a top-level cycle (pose_graph imports
+    # gtsam but is otherwise independent; bringing the helper in this close to
+    # the call keeps the dependency graph simple).
+    from src.optimization.pose_graph import _noise_from_override
+
     # Add LiDAR odometry between factors and IMU factors
     for i in range(1, n):
         # LiDAR between factor
         delta = np.linalg.inv(poses[i - 1]) @ poses[i]
-        graph.add(gtsam.BetweenFactorPose3(P(i - 1), P(i), gtsam.Pose3(delta), odom_noise))
+        edge_noise = odom_noise
+        if edge_sigmas is not None and i < len(edge_sigmas):
+            override = edge_sigmas[i]
+            if override is not None:
+                edge_noise = _noise_from_override(override)
+        graph.add(gtsam.BetweenFactorPose3(P(i - 1), P(i), gtsam.Pose3(delta), edge_noise))
 
         # IMU preintegration between LiDAR frames i-1 and i
         t_start = float(lidar_timestamps[i - 1])

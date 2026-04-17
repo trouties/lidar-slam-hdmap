@@ -212,3 +212,109 @@ def test_build_edge_sigmas_hysteresis_integration():
     assert edges[5] is None, "single spike should NOT trigger"
     assert all(edges[i] is not None for i in range(10, 18)), "sustained run should trigger"
     assert edges[0] is None and edges[9] is None
+
+
+# ---------------------------------------------------------------------------
+# Directional sigma inflation tests (SUP-07 Iter1)
+# ---------------------------------------------------------------------------
+
+
+def test_directional_covariance_symmetric_psd():
+    """Directional 6x6 covariance must be symmetric and positive semi-definite."""
+    from scripts.run_pipeline import _directional_covariance
+
+    v = np.array([0.6, -0.8, 0.0])  # arbitrary non-axial direction
+    cov = _directional_covariance(
+        base_sigmas=[0.1, 0.1, 0.1, 0.01, 0.01, 0.01],
+        eig_direction=v,
+        inflation_factor=10.0,
+    )
+    assert cov.shape == (6, 6)
+    np.testing.assert_allclose(cov, cov.T, atol=1e-14)
+    eigs = np.linalg.eigvalsh(cov)
+    assert eigs.min() > 0, f"covariance must be positive definite, min eig={eigs.min():.3e}"
+
+
+def test_directional_covariance_spectrum_axis_aligned():
+    """With v along x, translation block spectrum should be {σ²α², σ², σ²}."""
+    from scripts.run_pipeline import _directional_covariance
+
+    sigma = 0.1
+    alpha = 10.0
+    v = np.array([1.0, 0.0, 0.0])
+    cov = _directional_covariance(
+        base_sigmas=[sigma, sigma, sigma, 0.01, 0.01, 0.01],
+        eig_direction=v,
+        inflation_factor=alpha,
+    )
+    # GTSAM tangent order: rot block [0:3, 0:3], trans block [3:6, 3:6]
+    trans_block = cov[3:6, 3:6]
+    trans_eigs = np.sort(np.linalg.eigvalsh(trans_block))
+    expected = np.sort([sigma**2, sigma**2, (sigma * alpha) ** 2])
+    np.testing.assert_allclose(trans_eigs, expected, rtol=1e-10)
+
+    # Rotation block should be untouched: diag([rx², ry², rz²])
+    rot_block = cov[0:3, 0:3]
+    np.testing.assert_allclose(rot_block, np.diag([0.01**2] * 3), atol=1e-14)
+
+
+def test_directional_covariance_falls_back_on_zero_eigenvector():
+    """Degenerate zero eigenvector should fall back to uniform inflation."""
+    from scripts.run_pipeline import _directional_covariance
+
+    sigma = 0.1
+    alpha = 10.0
+    cov = _directional_covariance(
+        base_sigmas=[sigma, sigma, sigma, 0.01, 0.01, 0.01],
+        eig_direction=np.zeros(3),
+        inflation_factor=alpha,
+    )
+    trans_block = cov[3:6, 3:6]
+    # Fallback path builds isotropic σ²α² along all axes
+    np.testing.assert_allclose(trans_block, np.diag([(sigma * alpha) ** 2] * 3), atol=1e-14)
+
+
+def test_build_edge_sigmas_directional_produces_ndarray():
+    """Directional mode returns (6,6) ndarray entries, not 6-tuples."""
+    from scripts.run_pipeline import _build_edge_sigmas
+
+    n = 15
+    scores = np.zeros((n, 7), dtype=np.float64)
+    scores[:, 0] = 1.0
+    scores[5:13, 0] = 50.0  # 8-frame sustained run → should trigger
+    scores[5:13, 4:7] = np.array([1.0, 0.0, 0.0])  # eig_direction along x
+
+    edges = _build_edge_sigmas(
+        scores,
+        base_sigmas=[0.1, 0.1, 0.1, 0.01, 0.01, 0.01],
+        threshold=5.0,
+        inflation_factor=10.0,
+        ema_alpha=1.0,
+        min_consecutive=5,
+        sigma_mode="directional",
+    )
+    # Unflagged edges remain None
+    assert edges[0] is None and edges[14] is None
+    # Flagged edges are full 6x6 ndarrays (not 6-lists)
+    for i in range(5, 13):
+        assert isinstance(edges[i], np.ndarray), f"edge {i} type = {type(edges[i])}"
+        assert edges[i].shape == (6, 6)
+
+
+def test_build_edge_sigmas_invalid_mode_raises():
+    """Unknown sigma_mode should fail fast."""
+    from scripts.run_pipeline import _build_edge_sigmas
+
+    scores = np.zeros((3, 7), dtype=np.float64)
+    try:
+        _build_edge_sigmas(
+            scores,
+            base_sigmas=[0.1, 0.1, 0.1, 0.01, 0.01, 0.01],
+            threshold=5.0,
+            inflation_factor=10.0,
+            sigma_mode="invalid",
+        )
+    except ValueError as e:
+        assert "sigma_mode" in str(e)
+    else:
+        raise AssertionError("expected ValueError for unknown sigma_mode")

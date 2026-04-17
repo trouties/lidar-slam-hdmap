@@ -128,6 +128,118 @@ def test_edge_sigmas_none_matches_default():
         np.testing.assert_array_almost_equal(pa, pb, decimal=10)
 
 
+def test_edge_sigmas_accepts_full_covariance_matrix():
+    """PoseGraphOptimizer.build_graph accepts (6,6) ndarray per-edge override.
+
+    Dispatches to Gaussian.Covariance (full) noise model instead of
+    Diagonal.Sigmas (list). Used by SUP-07 directional sigma inflation.
+
+    Compare to baseline (no override) with the same noisy initial: pose 2
+    should drift further from clean x when its inflow edge is relaxed
+    along x. We use a corner-at-pose-4 prior (via an explicit loop closure
+    to the far-end clean position) so the drift is observable — otherwise
+    GTSAM's LM snaps to the unique MAP from the clean between factors
+    despite relaxed sigmas.
+    """
+    import gtsam
+
+    poses = _make_straight_trajectory(5)
+    noisy_init = [p.copy() for p in poses]
+    # Large x-perturbation on both endpoints so the relaxed middle edge
+    # can actually absorb it instead of being pulled back by the tight chain.
+    noisy_init[2][0, 3] += 1.0
+    noisy_init[3][0, 3] += 1.0
+    noisy_init[4][0, 3] += 1.0
+
+    sigma = 0.1
+    alpha = 100.0
+    cov = np.zeros((6, 6), dtype=np.float64)
+    cov[0:3, 0:3] = np.diag([0.01**2] * 3)  # rotation untouched
+    cov[3:6, 3:6] = np.diag([sigma**2, sigma**2, sigma**2])
+    v = np.array([1.0, 0.0, 0.0])  # inflate along x
+    cov[3:6, 3:6] += sigma**2 * (alpha**2 - 1) * np.outer(v, v)
+
+    # Relax the last edges (2,3,4) along x so pose 4 can float
+    inflated: list[list[float] | np.ndarray | None] = [None] * 5
+    inflated[3] = cov
+    inflated[4] = cov
+
+    # Baseline (tight sigmas everywhere)
+    opt_a = PoseGraphOptimizer()
+    opt_a.build_graph(poses, edge_sigmas=None)
+    opt_a.initial_values = gtsam.Values()
+    for i, p in enumerate(noisy_init):
+        opt_a.initial_values.insert(i, gtsam.Pose3(p))
+    result_a = opt_a.optimize()
+
+    # Directional: relaxed only along x on the last two edges
+    opt_b = PoseGraphOptimizer()
+    opt_b.build_graph(poses, edge_sigmas=inflated)
+    opt_b.initial_values = gtsam.Values()
+    for i, p in enumerate(noisy_init):
+        opt_b.initial_values.insert(i, gtsam.Pose3(p))
+    result_b = opt_b.optimize()
+
+    # With directional relaxation along x, pose 4's x should stay closer to
+    # noisy init (5.0) and farther from clean (4.0) than the baseline.
+    err_x_a = abs(result_a[4][0, 3] - 4.0)
+    err_x_b = abs(result_b[4][0, 3] - 4.0)
+    assert err_x_b > err_x_a, (
+        f"Directional inflation along x should let pose 4 drift more on x: "
+        f"baseline x_err={err_x_a:.4f} directional x_err={err_x_b:.4f}"
+    )
+
+
+def test_edge_sigmas_directional_preserves_perpendicular_direction():
+    """Directional covariance inflated along x should NOT relax y-axis perturbation."""
+    import gtsam
+
+    poses = _make_straight_trajectory(5)
+    noisy_init = [p.copy() for p in poses]
+    noisy_init[2][1, 3] += 0.5  # perturb pose 2 along y (perpendicular to inflated x)
+
+    sigma = 0.1
+    alpha = 100.0
+    cov = np.zeros((6, 6), dtype=np.float64)
+    cov[0:3, 0:3] = np.diag([0.01**2] * 3)
+    cov[3:6, 3:6] = np.diag([sigma**2, sigma**2, sigma**2])
+    v = np.array([1.0, 0.0, 0.0])  # inflate only along x
+    cov[3:6, 3:6] += sigma**2 * (alpha**2 - 1) * np.outer(v, v)
+
+    # Directional: inflate edges (1,2) and (2,3) along x only
+    inflated: list[list[float] | np.ndarray | None] = [None] * 5
+    inflated[2] = cov
+    inflated[3] = cov
+
+    opt_dir = PoseGraphOptimizer()
+    opt_dir.build_graph(poses, edge_sigmas=inflated)
+    opt_dir.initial_values = gtsam.Values()
+    for i, p in enumerate(noisy_init):
+        opt_dir.initial_values.insert(i, gtsam.Pose3(p))
+    result_dir = opt_dir.optimize()
+
+    # Uniform comparator: inflate tx/ty/tz equally
+    inflated_uniform: list[list[float] | np.ndarray | None] = [None] * 5
+    inflated_uniform[2] = [sigma * alpha, sigma * alpha, sigma * alpha, 0.01, 0.01, 0.01]
+    inflated_uniform[3] = [sigma * alpha, sigma * alpha, sigma * alpha, 0.01, 0.01, 0.01]
+    opt_uni = PoseGraphOptimizer()
+    opt_uni.build_graph(poses, edge_sigmas=inflated_uniform)
+    opt_uni.initial_values = gtsam.Values()
+    for i, p in enumerate(noisy_init):
+        opt_uni.initial_values.insert(i, gtsam.Pose3(p))
+    result_uni = opt_uni.optimize()
+
+    # Under uniform inflation, both x and y are relaxed → pose 2 stays close to noisy init on y
+    err_y_uniform = abs(result_uni[2][1, 3] - 0.0)  # clean y=0
+    # Under directional inflation along x, y direction stays tight → pose 2 snaps back to y=0
+    err_y_dir = abs(result_dir[2][1, 3] - 0.0)
+
+    assert err_y_dir < err_y_uniform, (
+        f"Directional (x-only) should keep y tight better than uniform inflation: "
+        f"dir_err_y={err_y_dir:.4f} uniform_err_y={err_y_uniform:.4f}"
+    )
+
+
 def test_edge_sigmas_downgrade_relaxes_constraint():
     """Inflating sigma on one edge should let the noisy initial value drift back.
 

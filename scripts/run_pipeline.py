@@ -116,8 +116,7 @@ def _write_degeneracy_csv(
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w") as f:
         f.write(
-            "frame_idx,cond_number,lambda_min,lambda_max,n_corr,"
-            "eig_dx,eig_dy,eig_dz,degenerate\n"
+            "frame_idx,cond_number,lambda_min,lambda_max,n_corr,eig_dx,eig_dy,eig_dz,degenerate\n"
         )
         for i in range(scores_arr.shape[0]):
             cond = scores_arr[i, 0]
@@ -169,6 +168,69 @@ def _apply_hysteresis(
     return np.asarray(sustained, dtype=bool)
 
 
+def _directional_covariance(
+    base_sigmas: list[float],
+    eig_direction: np.ndarray,
+    inflation_factor: float,
+) -> np.ndarray:
+    """Build a 6x6 GTSAM-tangent-order covariance with rank-1 directional inflation.
+
+    Uses the SUP-07 Zhang 2016 ICRA formulation: only the translation
+    variance *along* the least-observed direction (smallest eigenvalue of
+    the ICP translation Hessian) is inflated. The perpendicular
+    translation components and all rotation components keep their base
+    sigma. This replaces the uniform tx/ty/tz ×α inflation used in the
+    original SUP-07 detector.
+
+    Args:
+        base_sigmas: ``[tx, ty, tz, rx, ry, rz]`` in config order.
+        eig_direction: ``(3,)`` unit vector in the world frame aligned
+            with the degenerate translation direction (from
+            :class:`DegeneracyScore.eig_direction`).
+        inflation_factor: Multiplier applied to the sigma along
+            ``eig_direction`` (variance scales by ``factor**2``).
+
+    Returns:
+        Symmetric PSD ``(6, 6)`` covariance in GTSAM tangent order
+        ``[rx, ry, rz, tx, ty, tz]``.
+    """
+    trans_var = np.array(
+        [base_sigmas[0] ** 2, base_sigmas[1] ** 2, base_sigmas[2] ** 2], dtype=np.float64
+    )
+    rot_var = np.array(
+        [base_sigmas[3] ** 2, base_sigmas[4] ** 2, base_sigmas[5] ** 2], dtype=np.float64
+    )
+
+    v = np.asarray(eig_direction, dtype=np.float64).reshape(3)
+    v_norm = float(np.linalg.norm(v))
+    if not np.isfinite(v_norm) or v_norm < 1e-8:
+        # Unreliable eigenvector: fall back to uniform isotropic inflation along
+        # the identity so the edge is still relaxed, just non-directionally.
+        sigma_trans_sq = trans_var * (inflation_factor**2)
+        cov = np.zeros((6, 6), dtype=np.float64)
+        cov[0:3, 0:3] = np.diag(rot_var)
+        cov[3:6, 3:6] = np.diag(sigma_trans_sq)
+        return cov
+    v = v / v_norm
+
+    base_trans = np.diag(trans_var)
+    # Variance along v under the base: v^T diag(σ²) v. For isotropic base
+    # (σ_tx=σ_ty=σ_tz) this equals σ_tx² regardless of v.
+    sigma_along_sq = float(v @ base_trans @ v)
+    # After inflation: variance along v should be σ_along² · α². Add a
+    # rank-1 perturbation (α² - 1) · σ_along² · v v^T.
+    perturb = (inflation_factor**2 - 1.0) * sigma_along_sq * np.outer(v, v)
+    trans_cov = base_trans + perturb
+
+    cov = np.zeros((6, 6), dtype=np.float64)
+    cov[0:3, 0:3] = np.diag(rot_var)
+    cov[3:6, 3:6] = trans_cov
+    # Symmetrize defensively (outer product of float v should already be
+    # symmetric, but guards against accumulated fp noise).
+    cov = 0.5 * (cov + cov.T)
+    return cov
+
+
 def _build_edge_sigmas(
     scores_arr: np.ndarray,
     base_sigmas: list[float],
@@ -176,17 +238,28 @@ def _build_edge_sigmas(
     inflation_factor: float,
     ema_alpha: float = 0.3,
     min_consecutive: int = 5,
-) -> list[list[float] | None]:
+    sigma_mode: str = "uniform",
+) -> list[list[float] | np.ndarray | None]:
     """Produce a per-edge sigma override list for SUP-07.
 
-    Inflates only the translation components ``[tx, ty, tz]`` on edges
-    whose arrival frame is flagged degenerate by the hysteresis detector
-    (see :func:`_apply_hysteresis`). Rotation sigmas remain unchanged
-    because KISS-ICP rotation is still well observed in tunnel scenes
-    (ground + side walls pin roll/pitch/yaw).
+    Two inflation modes are supported:
+
+    * ``uniform`` (default): returns a 6-tuple per flagged edge with
+      ``[tx, ty, tz]`` scaled by ``inflation_factor`` and rotation sigmas
+      untouched. Matches the original SUP-07 detector.
+
+    * ``directional``: returns a full ``(6, 6)`` covariance per flagged
+      edge where only the variance along the least-observed translation
+      direction (from ``scores_arr[i, 4:7]`` eig_direction) is inflated.
+      More faithful to Zhang 2016 ICRA: the graph keeps the well-observed
+      lateral/vertical translation tight while the degenerate forward
+      direction is relaxed.
     """
+    if sigma_mode not in ("uniform", "directional"):
+        raise ValueError(f"sigma_mode must be 'uniform' or 'directional', got {sigma_mode!r}")
+
     n = scores_arr.shape[0]
-    edges: list[list[float] | None] = [None] * n
+    edges: list[list[float] | np.ndarray | None] = [None] * n
     if inflation_factor <= 1.0 or threshold <= 0 or n == 0:
         return edges
     sustained = _apply_hysteresis(
@@ -196,7 +269,9 @@ def _build_edge_sigmas(
         min_consecutive=min_consecutive,
     )
     for i in range(1, n):
-        if sustained[i]:
+        if not sustained[i]:
+            continue
+        if sigma_mode == "uniform":
             edges[i] = [
                 base_sigmas[0] * inflation_factor,
                 base_sigmas[1] * inflation_factor,
@@ -205,6 +280,13 @@ def _build_edge_sigmas(
                 base_sigmas[4],
                 base_sigmas[5],
             ]
+        else:  # directional
+            eig = scores_arr[i, 4:7]
+            edges[i] = _directional_covariance(
+                base_sigmas=base_sigmas,
+                eig_direction=eig,
+                inflation_factor=inflation_factor,
+            )
     return edges
 
 
@@ -391,9 +473,7 @@ def run_pipeline_cached(
             output_dir / f"degeneracy_{sequence}.csv",
             threshold=threshold,
         )
-        summary["metrics"]["degeneracy"] = _degeneracy_stats(
-            degeneracy_scores_arr, threshold
-        )
+        summary["metrics"]["degeneracy"] = _degeneracy_stats(degeneracy_scores_arr, threshold)
         if verbose:
             stats = summary["metrics"]["degeneracy"]
             print(
@@ -451,7 +531,7 @@ def run_pipeline_cached(
         timer_s3 = StageTimer("stage3_optimization")
         timer_s3_go = StageTimer("stage3_graph_optimize")
         # SUP-07: build per-edge sigma override list from degeneracy scores.
-        edge_sigmas: list[list[float] | None] | None = None
+        edge_sigmas: list[list[float] | np.ndarray | None] | None = None
         if sup07_enabled and degeneracy_scores_arr is not None:
             base_odom = gtsam_cfg.get("odom_sigmas") or [
                 0.1,
@@ -461,6 +541,7 @@ def run_pipeline_cached(
                 0.01,
                 0.01,
             ]
+            sigma_mode = str(sup07_cfg.get("sigma_mode", "uniform"))
             edge_sigmas = _build_edge_sigmas(
                 degeneracy_scores_arr,
                 base_sigmas=base_odom,
@@ -468,13 +549,18 @@ def run_pipeline_cached(
                 inflation_factor=float(sup07_cfg.get("sigma_inflation_factor", 1.0)),
                 ema_alpha=float(sup07_cfg.get("ema_alpha", 0.3)),
                 min_consecutive=int(sup07_cfg.get("min_consecutive", 5)),
+                sigma_mode=sigma_mode,
             )
             n_downgraded = sum(1 for e in edge_sigmas if e is not None)
-            summary.setdefault("metrics", {}).setdefault("degeneracy", {})[
-                "n_edges_downgraded"
-            ] = n_downgraded
+            summary.setdefault("metrics", {}).setdefault("degeneracy", {})["n_edges_downgraded"] = (
+                n_downgraded
+            )
+            summary["metrics"]["degeneracy"]["sigma_mode"] = sigma_mode
             if verbose:
-                print(f"  [sup07] downgrading {n_downgraded} odometry edge(s)")
+                print(
+                    f"  [sup07] downgrading {n_downgraded} odometry edge(s) "
+                    f"(sigma_mode={sigma_mode})"
+                )
         with timer_s3:
             closures = detector.detect(poses, dataset=dataset)
             if verbose:

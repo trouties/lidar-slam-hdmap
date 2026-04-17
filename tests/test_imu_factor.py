@@ -137,6 +137,70 @@ def test_build_tight_graph_returns_correct_count():
     assert len(bias_hist) == n
 
 
+def test_build_tight_graph_accepts_edge_sigmas():
+    """SUP-07 edge_sigmas override must flow into tight path BetweenFactors.
+
+    Mirrors PoseGraphOptimizer.build_graph behavior: an inflated edge
+    (uniform or full 6x6) should let an initial perturbation on the
+    arrival pose drift further than the baseline (no override).
+    """
+    from src.optimization.pose_graph import _noise_from_override
+
+    n = 5
+    poses = _straight_poses(n)
+    # Add x-perturbation to the last two poses on the noisy initial.
+    noisy = [p.copy() for p in poses]
+    noisy[3][0, 3] += 1.0
+    noisy[4][0, 3] += 1.0
+    lidar_ts = _uniform_timestamps(n)
+    imu_ts = _uniform_timestamps(50, dt=0.01)
+    acc, gyro = _gravity_imu(50)
+
+    sigma = 0.1
+    alpha = 100.0
+    cov = np.zeros((6, 6), dtype=np.float64)
+    cov[0:3, 0:3] = np.diag([0.01**2] * 3)
+    cov[3:6, 3:6] = np.diag([sigma**2, sigma**2, sigma**2])
+    v = np.array([1.0, 0.0, 0.0])
+    cov[3:6, 3:6] += sigma**2 * (alpha**2 - 1) * np.outer(v, v)
+
+    edge_sigmas: list[list[float] | np.ndarray | None] = [None] * n
+    edge_sigmas[4] = cov
+
+    # Sanity: _noise_from_override accepts the ndarray and produces a Gaussian noise model
+    noise = _noise_from_override(cov)
+    assert noise is not None
+
+    # With inflated edge sigma on edge (3, 4) along x, pose 4 should remain
+    # closer to its noisy initial x (5.0 instead of clean 4.0) than without.
+    opt_with, _, _ = build_tight_coupled_graph(
+        poses=noisy,  # initial values
+        imu_acc=acc,
+        imu_gyro=gyro,
+        imu_timestamps=imu_ts,
+        lidar_timestamps=lidar_ts,
+        edge_sigmas=edge_sigmas,
+    )
+    opt_without, _, _ = build_tight_coupled_graph(
+        poses=noisy,
+        imu_acc=acc,
+        imu_gyro=gyro,
+        imu_timestamps=imu_ts,
+        lidar_timestamps=lidar_ts,
+        edge_sigmas=None,
+    )
+    # With the last edge relaxed along x, optimized x for pose 4 should be
+    # further from the between-factor-predicted position than baseline.
+    # Predicted position: pose3_opt + delta(3,4) = pose3 + 1.0 = 4.0 nominal.
+    # Relax lets pose 4 stay closer to initial 5.0.
+    dx_with = opt_with[4][0, 3] - opt_with[3][0, 3]
+    dx_without = opt_without[4][0, 3] - opt_without[3][0, 3]
+    assert abs(dx_with - 1.0) > abs(dx_without - 1.0), (
+        f"edge_sigmas override should relax step 3->4: "
+        f"baseline dx={dx_without:.4f} relaxed dx={dx_with:.4f}"
+    )
+
+
 def test_build_tight_graph_pose_shape():
     poses = _straight_poses(5)
     lidar_ts = _uniform_timestamps(5, dt=0.1)

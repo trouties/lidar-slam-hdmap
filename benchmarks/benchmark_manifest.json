@@ -650,5 +650,62 @@
       "validation_pass": true,
       "violations": []
     }
+  },
+  {
+    "run_id": "826f13bb234b",
+    "task": "SUP-07",
+    "git_sha": "018eeab07a1d7064ee309c24b2fd93c08d83caac",
+    "config_hash": "ea9430b45ffa7945",
+    "timestamp": "2026-04-17T23:24:31.638727+00:00",
+    "sequences": [
+      "00",
+      "01"
+    ],
+    "artifacts": [
+      "benchmarks/sup07/degeneracy_summary.csv",
+      "benchmarks/sup07/ape_compare.csv",
+      "benchmarks/sup07/degeneracy_00_baseline.csv",
+      "benchmarks/sup07/degeneracy_01_baseline.csv"
+    ],
+    "metrics": {
+      "threshold": 5.514407782775916,
+      "threshold_percentile": 95.0,
+      "baseline_sequence": "00",
+      "inflation_factor": 10.0,
+      "sigma_mode": "directional",
+      "summary": [
+        {
+          "sequence": "00",
+          "cond_count": 4540,
+          "cond_p50": 3.0661907150071777,
+          "cond_p95": 5.514407782775916,
+          "cond_p99": 7.059553514450691,
+          "cond_max": 8.96097152123501,
+          "threshold": 5.514407782775916,
+          "n_above_threshold": 227,
+          "ape_baseline": 10.576949912883341,
+          "ape_downgrade": 10.565254087555212,
+          "ape_ratio": 0.9988942156836838
+        },
+        {
+          "sequence": "01",
+          "cond_count": 1100,
+          "cond_p50": 12.377943694375407,
+          "cond_p95": 45.13102835304246,
+          "cond_p99": 80.06350894213413,
+          "cond_max": 127.97333866782286,
+          "threshold": 5.514407782775916,
+          "n_above_threshold": 1078,
+          "ape_baseline": 116.80364123769321,
+          "ape_downgrade": 116.80364123769318,
+          "ape_ratio": 0.9999999999999998
+        }
+      ],
+      "acceptance": {
+        "c1_cond_ratio": true,
+        "c2_ape_no_harm": true,
+        "overall": true
+      }
+    }
   }
 ]

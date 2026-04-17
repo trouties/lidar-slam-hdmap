@@ -18,7 +18,9 @@ gtsam:
 sup07:
   # LiDAR degeneracy detection (Zhang 2016 ICRA-inspired).
   # When enabled=false, Stage 2/3 behavior is identical to legacy (optimized cache bytes unchanged).
-  enabled: false
+  # Enabled by default as of SUP-07 Iter3 (2026-04-18): the directional sigma_mode
+  # path is APE-neutral on non-degenerate frames and strictly improves Seq 00.
+  enabled: true
   # Analyzer parameters locked (tuned via tune_sup07, see pipeline-notes §17):
   # voxel_size=0.3 / min_quality=0.5 / normal_k=15 raises Seq 01 p50 cond
   # from 4.4 to 12.4 (>2×Seq 00 p95), passing SUP-07 criterion 1 acceptance.
@@ -31,6 +33,13 @@ sup07:
   cond_threshold: 5.514
   # Degeneracy response: only inflate tx/ty/tz; keep rotation (KISS-ICP rotation remains reliable on highway)
   sigma_inflation_factor: 10.0
+  # Inflation strategy:
+  #   "uniform"     — scale tx/ty/tz diagonal by inflation_factor (legacy, 2026-04-15 baseline)
+  #   "directional" — full 6x6 covariance, inflating only the variance along the
+  #                   least-observed ICP Hessian eigenvector (Zhang 2016 ICRA-faithful).
+  # Directional keeps the well-observed lateral / vertical translation tight,
+  # relaxing only the forward direction on highway frames — see pipeline-notes §19.
+  sigma_mode: "directional"
   # Hysteresis: EMA smoothing + minimum consecutive exceedance. Prevents the
   # detector from degenerating into an always-on flag (Seq 01 went from
   # 1078/1101=97.9% triggered to localized spikes after hysteresis). See

@@ -168,6 +168,7 @@ def _run_pass(
     max_frames: int | None,
     out_dir: Path,
     closures_cache: dict[str, list] | None = None,
+    sigma_mode: str = "uniform",
 ) -> tuple[np.ndarray, float]:
     """Return (scores_arr, ape_rmse) for one pass."""
     cfg_seq = copy.deepcopy(cfg)
@@ -198,9 +199,10 @@ def _run_pass(
         inflation_factor=inflation_factor,
         ema_alpha=float(sup07_cfg.get("ema_alpha", 0.3)),
         min_consecutive=int(sup07_cfg.get("min_consecutive", 5)),
+        sigma_mode=sigma_mode,
     )
     n_downgraded = sum(1 for e in edge_sigmas if e is not None)
-    print(f"  [{label}] downgrading {n_downgraded}/{len(poses)} edges")
+    print(f"  [{label}] downgrading {n_downgraded}/{len(poses)} edges (sigma_mode={sigma_mode})")
 
     print(f"  [{label}] Stage 3 (pose graph + loop closure)")
     cached_closures = closures_cache.get(sequence) if closures_cache is not None else None
@@ -254,6 +256,17 @@ def main() -> None:
     parser.add_argument("--threshold-multiplier", type=float, default=1.0)
     parser.add_argument("--threshold-override", type=float, default=None)
     parser.add_argument(
+        "--sigma-mode",
+        choices=["uniform", "directional"],
+        default=None,
+        help=(
+            "SUP-07 inflation strategy: 'uniform' (legacy) scales all of tx/ty/tz by "
+            "inflation_factor; 'directional' (Zhang 2016 ICRA-faithful) inflates "
+            "only the variance along the least-observed eigenvector. Overrides "
+            "configs/default.yaml sup07.sigma_mode when set."
+        ),
+    )
+    parser.add_argument(
         "--no-cache",
         action="store_true",
         help="Disable layered cache entirely (forces Stage 2 rerun)",
@@ -267,6 +280,10 @@ def main() -> None:
     cfg = load_config(args.config)
     # SUP-07 must be "active" so analyzer params get into the cache hash.
     cfg.setdefault("sup07", {})["enabled"] = True
+    if args.sigma_mode is not None:
+        cfg["sup07"]["sigma_mode"] = args.sigma_mode
+    sigma_mode = str(cfg["sup07"].get("sigma_mode", "uniform"))
+    print(f"sigma_mode = {sigma_mode}")
 
     analyzer = _make_analyzer(cfg)
     cache_root = cfg.get("cache", {}).get("root", "cache/kitti")
@@ -301,6 +318,7 @@ def main() -> None:
             max_frames=args.max_frames,
             out_dir=out_dir,
             closures_cache=closures_cache,
+            sigma_mode=sigma_mode,
         )
         baseline_scores[seq] = scores
         baseline_ape[seq] = ape
@@ -350,6 +368,7 @@ def main() -> None:
             max_frames=args.max_frames,
             out_dir=out_dir,
             closures_cache=closures_cache,
+            sigma_mode=sigma_mode,
         )
         downgrade_ape[seq] = ape
 
@@ -445,6 +464,7 @@ def main() -> None:
             "threshold_percentile": args.threshold_percentile,
             "baseline_sequence": args.baseline_sequence,
             "inflation_factor": args.inflation_factor,
+            "sigma_mode": sigma_mode,
             "summary": summary_rows,
             "acceptance": {
                 "c1_cond_ratio": passed_1,

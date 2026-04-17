@@ -10,6 +10,26 @@ import gtsam
 import numpy as np
 
 
+def _noise_from_override(
+    override: list[float] | np.ndarray,
+) -> gtsam.noiseModel.Base:
+    """Build a GTSAM noise model from a per-edge override.
+
+    Accepts either a length-6 list in config order ``[tx, ty, tz, rx, ry, rz]``
+    (diagonal) or a ``(6, 6)`` ndarray in GTSAM tangent order
+    ``[rx, ry, rz, tx, ty, tz]`` (full Gaussian covariance). Used by
+    SUP-07 to switch between uniform tx/ty/tz inflation and directional
+    inflation sharing the same build path.
+    """
+    if isinstance(override, np.ndarray):
+        cov = np.asarray(override, dtype=np.float64)
+        if cov.shape != (6, 6):
+            raise ValueError(f"ndarray edge sigma must be (6,6), got {cov.shape}")
+        return gtsam.noiseModel.Gaussian.Covariance(cov)
+    s = override
+    return gtsam.noiseModel.Diagonal.Sigmas(np.array([*s[3:], *s[:3]]))
+
+
 class PoseGraphOptimizer:
     """GTSAM-based pose graph optimizer.
 
@@ -54,7 +74,7 @@ class PoseGraphOptimizer:
         poses: list[np.ndarray],
         prior_indices: list[int] | None = None,
         gt_poses: list[np.ndarray] | None = None,
-        edge_sigmas: list[list[float] | None] | None = None,
+        edge_sigmas: list[list[float] | np.ndarray | None] | None = None,
     ) -> None:
         """Build pose graph from sequential odometry poses.
 
@@ -72,11 +92,16 @@ class PoseGraphOptimizer:
             edge_sigmas: Optional per-edge noise override. Length must be
                 ``len(poses)``; entry ``i`` applies to the edge
                 ``(i-1, i)`` (entry ``0`` is unused). ``None`` entries
-                fall back to the global :attr:`odom_noise`. Sigma order is
-                the config ``[tx, ty, tz, rx, ry, rz]``; reordered to
-                GTSAM convention internally. Used by SUP-07 degeneracy
-                downgrade to inflate translation sigmas on frames where
-                LiDAR constraint rank collapses.
+                fall back to the global :attr:`odom_noise`. Two forms are
+                accepted per entry:
+                  * ``list[float]`` of length 6 in config order
+                    ``[tx, ty, tz, rx, ry, rz]`` — builds a diagonal noise
+                    model (SUP-07 ``uniform`` mode).
+                  * ``np.ndarray`` of shape ``(6, 6)`` in GTSAM tangent
+                    order ``[rx, ry, rz, tx, ty, tz]`` — builds a full
+                    Gaussian covariance noise model (SUP-07 ``directional``
+                    mode, where only the degenerate translation axis is
+                    inflated via a rank-1 update).
         """
         self.graph = gtsam.NonlinearFactorGraph()
         self.initial_values = gtsam.Values()
@@ -110,7 +135,7 @@ class PoseGraphOptimizer:
                 if edge_sigmas is not None and i < len(edge_sigmas):
                     s = edge_sigmas[i]
                     if s is not None:
-                        edge_noise = gtsam.noiseModel.Diagonal.Sigmas(np.array([*s[3:], *s[:3]]))
+                        edge_noise = _noise_from_override(s)
 
                 self.graph.add(gtsam.BetweenFactorPose3(i - 1, i, gtsam.Pose3(delta), edge_noise))
 
