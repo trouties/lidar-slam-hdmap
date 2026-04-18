@@ -270,7 +270,7 @@ class MapBuilder:
         Used to go from the cached ``master_voxel_size`` (e.g. 0.05 m) master
         cloud to the Stage 5 working ``voxel_size`` (e.g. 0.15 m) without
         re-running the full per-frame accumulation. Reuses the numpy-native
-        ``_voxel_aggregate`` for memory safety — ``pipeline-notes.md:82-99``
+        ``_voxel_aggregate`` for memory safety — ``refs/conventions.md`` §7
         forbids ``o3d.voxel_down_sample`` on aggregated state because it
         thrashes sort buffers on large inputs.
 

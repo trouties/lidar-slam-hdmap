@@ -10,7 +10,7 @@ Two-pass evaluation:
   - Pass A (baseline):  sup07 scores computed but no downgrade applied.
   - Pass B (downgrade): edge sigmas inflated on frames above cond threshold.
 
-Acceptance criteria (from refs/SLAM_Spec_Supplement_v1.md SUP-07):
+Acceptance criteria (from refs/backlog.md SUP-07):
   1. Seq 01 cond_number median >= Seq 00 cond_number p95 * 2
   2. Seq 01 APE(downgrade) / APE(baseline) <= 1.0
   3. At least one visualization exists (plot_sup07.py run separately).

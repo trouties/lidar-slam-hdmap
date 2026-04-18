@@ -19,7 +19,7 @@ lio_sam:
   # "first pose = identity" convention by the vehicle's initial heading
   # (~60 deg on Seq 00). Empirically this flag is also necessary to avoid
   # IMU-preintegration runaway under nav-frame accel + datasheet noise;
-  # see SUP-01 P0-1 rework notes in pipeline-notes for measurements.
+  # see SUP-01 P0-1 rework notes in refs/sup-notes.md for measurements.
   useImuHeadingInitialization: false
   useGpsElevation: false
   gpsCovThreshold: 2.0
@@ -44,7 +44,7 @@ lio_sam:
   # common/kitti_to_rosbag.py::_oxts_body_accel (cols 14-16, body-frame
   # specific force; OxTS af/al/au already include g, so no gravity
   # reinjection — the gravity-reinjection premise was empirically wrong
-  # for KITTI). See SUP-01 P0-1 Stage 3 in pipeline-notes.
+  # for KITTI). See SUP-01 P0-1 Stage 3 in refs/sup-notes.md.
   imuAccNoise: 3.9939570888238808e-03
   imuGyrNoise: 1.5636343949698187e-03
   imuAccBiasN: 6.4356659353532566e-05
@@ -61,7 +61,7 @@ lio_sam:
   # upstream params_kitti.yaml. Forcing it to a pure identity (because
   # R_velo_imu is "close enough to I") regresses Seq 00 SE(3) APE from 30 m
   # to 44 m -- LIO-SAM treats RPY as exact, not as an approximation. See
-  # SUP-01 P0-1 rework notes in pipeline-notes for the measurement.
+  # SUP-01 P0-1 rework notes in refs/sup-notes.md for the measurement.
   extrinsicTrans: [-8.086759000e-01, 3.195559000e-01, -7.997231000e-01]
   extrinsicRot: [9.999976000e-01, 7.553071000e-04, -2.035826000e-03, -7.854027000e-04, 9.998898000e-01, -1.482298000e-02, 2.024406000e-03, 1.482454000e-02, 9.998881000e-01]
   extrinsicRPY: [9.999976000e-01, 7.553071000e-04, -2.035826000e-03, -7.854027000e-04, 9.998898000e-01, -1.482298000e-02, 2.024406000e-03, 1.482454000e-02, 9.998881000e-01]

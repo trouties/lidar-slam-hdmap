@@ -9,6 +9,7 @@ build/
 refs/
 results/
 /cache/
+/cache_sup09/
 /logs/
 external/baselines/*/build/
 external/baselines/*/devel/
@@ -25,3 +26,15 @@ benchmarks/uncertainty/*
 !benchmarks/uncertainty/ellipsoid_animation_00_tight.gif
 !benchmarks/uncertainty/sup06_report_00.json
 !benchmarks/uncertainty/marginal_cov_00_loose.csv
+
+# SUP-08 — colcon build generates transient build/install/log trees we do
+# not want to track. Package source (ros2_ws/src/) stays in git.
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
+
+# SUP-09 — compose acceptance run logs are transient. Keep only the canonical
+# artifacts (summary JSON + sha256 + the committed trajectory screenshot).
+benchmarks/sup09/build.log
+benchmarks/sup09/up.log
+benchmarks/sup09/http_server.log

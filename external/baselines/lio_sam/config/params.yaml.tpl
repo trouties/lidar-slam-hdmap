@@ -19,7 +19,7 @@ lio_sam:
   # "first pose = identity" convention by the vehicle's initial heading
   # (~60 deg on Seq 00). Empirically this flag is also necessary to avoid
   # IMU-preintegration runaway under nav-frame accel + datasheet noise;
-  # see SUP-01 P0-1 rework notes in pipeline-notes for measurements.
+  # see SUP-01 P0-1 rework notes in refs/sup-notes.md for measurements.
   useImuHeadingInitialization: false
   useGpsElevation: false
   gpsCovThreshold: 2.0
@@ -41,7 +41,7 @@ lio_sam:
   # (100× σ) made APE 6×worse (1076m → 6406m), so the "Large velocity, reset
   # IMU-preintegration!" at 470+/4541 frames is NOT a noise tuning issue —
   # it's structural (IMU content vs LIO-SAM expectations). Keep datasheet
-  # values; root cause tracked as SUP-01 P0-3 in pipeline-notes §20.
+  # values; root cause tracked as SUP-01 P0-2 in refs/sup-notes.md.
   imuAccNoise: 3.9939570888238808e-03
   imuGyrNoise: 1.5636343949698187e-03
   imuAccBiasN: 6.4356659353532566e-05
@@ -55,8 +55,9 @@ lio_sam:
   # A single image slam-baselines/lio_sam:latest serves all sequences; the
   # per-sequence calibration is picked up from the $SEQ env var. Runtime
   # rendering replaces the build-time `inject_kitti_extrinsic.py` pipeline,
-  # which suffered from a docker layer-cache divergence (see §20.4 in
-  # refs/pipeline-notes.md). Do NOT hand-edit the rendered file — it is
+  # which suffered from a docker layer-cache divergence (see SUP-01
+  # Per-sequence LIO-SAM 构建 section in refs/sup-notes.md). Do NOT hand-edit
+  # the rendered file — it is
   # regenerated every container start.
   # extrinsicRPY is set equal to extrinsicRot; forcing identity regresses
   # Seq 00 SE(3) APE by ~15 m because LIO-SAM treats RPY as exact.

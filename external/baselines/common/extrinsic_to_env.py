@@ -4,8 +4,8 @@
 SUP-01 Stage C: LIO-SAM now reads its LiDAR-IMU extrinsic from KITTI Raw
 calibration at container start (runtime envsubst) instead of during
 ``docker build`` via ``inject_kitti_extrinsic.py``. This removes the
-build-time layer-cache divergence tracked in ``refs/pipeline-notes.md``
-§20.4.
+build-time layer-cache divergence tracked in ``refs/sup-notes.md``
+SUP-01 Per-sequence LIO-SAM 构建 section.
 
 Usage (inside the lio_sam container)::
 

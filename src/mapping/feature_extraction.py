@@ -80,7 +80,7 @@ def extract_curbs(
     （曲率突变 = 路面边界）". On a voxelized ground map (working voxel
     0.15 m) the signal of interest reduces to a z discontinuity between
     adjacent xy cells, so this implementation uses a pure-numpy 2D grid
-    instead of Open3D normal estimation. See ``refs/pipeline-notes.md``
+    instead of Open3D normal estimation. See ``refs/conventions.md`` §7
     (Stage 5 MapBuilder memory discipline) — running ``estimate_normals``
     on a 30M-point working map is not memory-safe; this function only
     allocates ``O(N)`` int64 keys plus ``O(C)`` per-cell arrays

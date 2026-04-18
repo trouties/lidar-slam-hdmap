@@ -21,7 +21,7 @@ sup07:
   # Enabled by default as of SUP-07 Iter3 (2026-04-18): the directional sigma_mode
   # path is APE-neutral on non-degenerate frames and strictly improves Seq 00.
   enabled: true
-  # Analyzer parameters locked (tuned via tune_sup07, see pipeline-notes §17):
+  # Analyzer parameters locked (tuned via tune_sup07, see refs/sup-notes.md SUP-07):
   # voxel_size=0.3 / min_quality=0.5 / normal_k=15 raises Seq 01 p50 cond
   # from 4.4 to 12.4 (>2×Seq 00 p95), passing SUP-07 criterion 1 acceptance.
   max_correspondences: 5000       # per-frame NN sampling cap
@@ -38,12 +38,12 @@ sup07:
   #   "directional" — full 6x6 covariance, inflating only the variance along the
   #                   least-observed ICP Hessian eigenvector (Zhang 2016 ICRA-faithful).
   # Directional keeps the well-observed lateral / vertical translation tight,
-  # relaxing only the forward direction on highway frames — see pipeline-notes §19.
+  # relaxing only the forward direction on highway frames — see refs/sup-notes.md SUP-07.
   sigma_mode: "directional"
   # Hysteresis: EMA smoothing + minimum consecutive exceedance. Prevents the
   # detector from degenerating into an always-on flag (Seq 01 went from
   # 1078/1101=97.9% triggered to localized spikes after hysteresis). See
-  # pipeline-notes §19 "hysteresis" subsection.
+  # refs/sup-notes.md SUP-07 "Hysteresis" subsection.
   ema_alpha: 0.3
   min_consecutive: 5
 

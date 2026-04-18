@@ -245,7 +245,7 @@ def _oxts_nav_accel(oxts_row: np.ndarray) -> tuple[float, float, float]:
     IMU content that produced the historical stage0-v3 SE(3) APE = 27 m.
     It is physically wrong for body-frame preintegration on a moving
     vehicle but empirically the path GTSAM is happy with on KITTI.
-    SUP-01 α fallback (see refs/pipeline-notes.md §20).
+    SUP-01 α fallback (see refs/sup-notes.md SUP-01).
     """
     return float(oxts_row[11]), float(oxts_row[12]), float(oxts_row[13])
 

@@ -21,7 +21,7 @@ classifiers and counted independently. The lane thin/thick/area thresholds
 must NOT be reused for curbs (curb physical width has only one class -- a
 curbstone line) and the two cluster lists must NOT be concatenated (would
 pollute lane PCA statistics with curb shape distribution). See
-``refs/pipeline-notes.md`` "下一轮 Stage 6 优化清单" for the binding rules.
+``refs/conventions.md`` §13 "Stage 6 curb 接入" red lines for the binding rules.
 """
 
 from __future__ import annotations
@@ -240,8 +240,8 @@ def classify_curb_cluster(
     Curbs have a single physical class (curbstone line), so this returns
     only ``"curb"`` or ``"noise"`` -- never thin/thick/area. Defaults are
     derived from Stage 5 v4 measurements: median linearity 0.91, median
-    thickness 0.46m (see ``refs/pipeline-notes.md`` "Stage 5 curb 检测调
-    参") and the stage6-curb-v2 11-sequence benchmark.
+    thickness 0.46m (see ``refs/conventions.md`` §10 "Stage 5 curb 检测锁
+    定值") and the stage6-curb-v2 11-sequence benchmark.
 
     Internally, clusters that fail the first PCA pass *only* on thickness
     get one minor-axis MAD-trim retry (controlled by ``trim_k``); see
@@ -704,7 +704,7 @@ def export_lanelet2_osm(
     Two independent channels (lane and curb) are processed separately and
     never merged. Their cluster lists, classifiers, OSM tags, and metric
     counts are all kept distinct so threshold tuning on one channel cannot
-    pollute the other (see ``refs/pipeline-notes.md:259-271``).
+    pollute the other (see ``refs/conventions.md`` §13 "Stage 6 curb 接入").
 
     Args:
         lane_clusters: Stage 5 lane-marking clusters, ``(k_i, 3)`` each.
