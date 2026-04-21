@@ -234,6 +234,35 @@ def audit_fast_lio2() -> tuple[Report, list[float] | None, list[float] | None]:
                 f"over-downweighted; expect LiDAR-ICP drift (SUP-01 Phase B.2).",
             )
 
+    # SUP-01 Phase C: skip_undistortion must be true in repo-tracked kitti.yaml.
+    # The flag only has effect if the Docker image was built with the bundled
+    # kitti_skip_deskew.patch; audit the repo-tracked config as a regression
+    # guard (if someone reverts to false, Phase B v3 134 m APE_SE3 returns).
+    skip = _extract_yaml_scalar(text, "skip_undistortion")
+    if skip is None:
+        r.fail(
+            "skip_undistortion",
+            "missing from kitti.yaml — Phase C patch has no effect without "
+            "this flag; expect 134 m APE_SE3 on Seq 00 (see "
+            "results/diagnostics/phaseB_report.md).",
+        )
+    elif skip.strip().lower() == "true":
+        r.pass_("skip_undistortion", "true (KITTI pre-deskew bypass enabled, SUP-01 Phase C)")
+    else:
+        r.fail(
+            "skip_undistortion",
+            f"{skip!r} — must be true on KITTI to bypass double-compensation "
+            "(FAST-LIO2 deskew of already-deskewed .bin causes 134 m drift).",
+        )
+    patch_path = BASELINES / "fast_lio2" / "kitti_skip_deskew.patch"
+    if not patch_path.exists():
+        r.fail(
+            "kitti_skip_deskew.patch",
+            f"missing: {patch_path} — Docker build will fail or skip_undistortion flag has no effect.",
+        )
+    else:
+        r.pass_("kitti_skip_deskew.patch", "present (consumed by Dockerfile COPY)")
+
     # Launch file: the critical "extrinsic_T override" bug that nullifies 0.8 m offset
     if not launch_path.exists():
         r.fail("launch file", f"missing: {launch_path}")

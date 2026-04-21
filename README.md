@@ -37,16 +37,19 @@ Stage 4 (ESKF) is pose smoothing only; KITTI Odometry has no IMU, so it runs a c
 
 ### System Accuracy on KITTI Seq 00
 
-Both first-frame-aligned and SE(3) Umeyama-aligned APE reported (see `src/odometry/kiss_icp_wrapper.py:evaluate_odometry(align=...)`, added 2026-04-18).
+Both first-frame-aligned and SE(3) Umeyama-aligned APE reported. Baseline rows reflect Phase C / E source-level fixes; pre-fix numbers preserved in `benchmarks/accuracy_table.csv`.
 
-| System | APE first (m) | **APE SE(3) (m)** | Paper (m) | Status |
-|--------|--------------:|------------------:|----------:|:-------|
-| **Ours (fused)** | 10.57 | **4.03** | — | Reproduced |
-| FAST-LIO2 | 218.4 | 134.3 | 3–8 | KNOWN_LIMITATION (KITTI deskew incompat) |
-| hdl_graph_slam | 215.9 | 200.4 | 6–15 | KNOWN_LIMITATION (LiDAR-only drift) |
-| LIO-SAM | 930.0 | 582.5 | 3–7 | KNOWN_LIMITATION (P0-2 structural) |
+| System | APE first (m) | **APE SE(3) (m)** | Paper (m) | Notes |
+|--------|--------------:|------------------:|----------:|:------|
+| **Ours (fused)** | 10.57 | **4.03** | — | — |
+| LIO-SAM (6AXIS fork) | 42.9 | **31.7** | 3–7 | 18.4× over upstream via Phase E |
+| FAST-LIO2 (skip-deskew patch) | 143.2 | **88.6** | 3–8 | −34% over upstream via Phase C |
+| hdl_graph_slam | 215.9 | 200.4 | 6–15 | LiDAR-only |
 
-Our fused pipeline reaches **4.03 m SE(3)-APE** (STRETCH target). The three external baselines were analyzed end-to-end through Phase A/B (see `results/diagnostics/phaseA_report.md` + `phaseB_report.md`); gaps to paper values trace to *independent* non-tunable causes: LIO-SAM's `imuPreintegration.cpp` resets (P0-2 structural), KITTI `.bin` clouds being vendor-deskewed (FAST-LIO2's motion compensation becomes double-compensation), and hdl_graph_slam's LiDAR-only architecture ceiling over a 3 km route. Closing any of them requires source-level baseline patches, not parameter tuning. Full record: `refs/sup-notes.md → SUP-01 Phase A/B Reproduction Attempt`.
+- **LIO-SAM Phase E**: upstream swapped from `TixiaoShan/LIO-SAM` to `JokerJohn/LIO_SAM_6AXIS` (`d4318f70`). APE_SE3 582 → 31.7 m, RPE 142 → 1.12 m.
+- **FAST-LIO2 Phase C**: 10-line patch `external/baselines/fast_lio2/kitti_skip_deskew.patch` adds `preprocess/skip_undistortion` to bypass double motion compensation (KITTI `.bin` is already vendor-deskewed). APE_SE3 134 → 88.6 m, Z-drift −83 → +20 m.
+
+Full record: `refs/sup-notes.md` + per-phase diagnostic reports in `results/diagnostics/`.
 
 ### Stage-by-Stage Accuracy on Seq 00
 
@@ -131,7 +134,7 @@ The author's geodetic-science background shapes the implementation: explicit WGS
 - **Scan Context v2 loop closure** — appearance-based place recognition; 2,635 closures on Seq 00 at P=0.967.
 - **Tight-coupled IMU preintegration** — GTSAM Forster-2017 factor; −20% APE vs loose fusion on Seq 00.
 - **Lanelet2 geometry export** — PCA-classified lane / curb morphology, RDP-simplified, written as `lineStringLayer`.
-- **4-system baseline comparison** — Dockerized hdl_graph_slam / FAST-LIO2 / LIO-SAM with APE/RPE tables.
+- **4-system baseline comparison** — Dockerized hdl_graph_slam / FAST-LIO2 / LIO-SAM with APE/RPE tables and Phase C/E source-level fixes.
 - **Runtime profiling + Stage-3 2.19× speedup** — per-unique-frame downsample cache, zero APE regression.
 - **Uncertainty under GNSS denial (SUP-06)** — GTSAM marginals → 3D 2σ ellipsoids, 26–28× inflation then recovery.
 - **LiDAR degeneracy detection (SUP-07)** — 3×3 Hessian + hysteresis, per-edge σ downgrade on sustained runs.

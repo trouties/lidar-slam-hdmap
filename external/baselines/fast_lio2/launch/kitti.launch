@@ -19,6 +19,11 @@
   <!-- Do NOT override mapping/extrinsic_T here. kitti.yaml carries the real
        KITTI Raw calib (~0.8 m LiDAR-IMU offset). A zero override was a
        SUP-01 regression caught by scripts/audit_baseline_configs.py. -->
+  <!-- SUP-01 Phase C: double-insurance for skip_undistortion. kitti.yaml
+       also sets this; <param> beats <rosparam> so the value here wins if a
+       future edit accidentally removes the yaml entry. Requires the
+       kitti_skip_deskew.patch (see Dockerfile) for any effect. -->
+  <param name="preprocess/skip_undistortion" type="bool" value="true" />
 
   <node pkg="fast_lio" type="fastlio_mapping" name="laserMapping"
         output="screen" respawn="false">

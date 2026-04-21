@@ -14,6 +14,10 @@ results/
 external/baselines/*/build/
 external/baselines/*/devel/
 external/baselines/*/results/*.txt
+# SUP-01 Phase E: per-fork-switch rollback snapshots of upstream config.
+# Git history is authoritative for rollback; these .bak_upstream files are
+# only kept in the working tree as a local convenience.
+external/baselines/**/*.bak_upstream
 /tmp/baseline_*.log
 CLAUDE.md
 .vscode/

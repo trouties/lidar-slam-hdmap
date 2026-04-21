@@ -65,8 +65,14 @@ roslaunch /launch/kitti.launch &
 SLAM_PID=$!
 sleep 8
 
+# SUP-01 Phase E: 6AXIS fork publishes on /lio_sam_6axis/mapping/odometry
+# (was /lio_sam/mapping/odometry under TixiaoShan upstream). Both record
+# and extract must use the new topic name. Backup of upstream run.sh
+# available via git diff; the change is 2 line-level substitutions.
+ODOM_TOPIC="/lio_sam_6axis/mapping/odometry"
+
 echo "[2/4] Recording odometry and playing cached bag..."
-rosbag record -O "${ODOM_BAG}" /lio_sam/mapping/odometry &
+rosbag record -O "${ODOM_BAG}" "${ODOM_TOPIC}" &
 RECORD_PID=$!
 sleep 1
 
@@ -81,7 +87,7 @@ sleep 2
 echo "[3/4] Extracting poses..."
 python3 /scripts/extract_poses.py \
     --odom-bag "${ODOM_BAG}" \
-    --odom-topic /lio_sam/mapping/odometry \
+    --odom-topic "${ODOM_TOPIC}" \
     --lidar-bag "${BAG}" \
     --output "${OUTPUT_DIR}/poses_${SEQ}.txt"
 
