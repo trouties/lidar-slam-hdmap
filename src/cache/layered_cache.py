@@ -80,8 +80,9 @@ def _config_subtree(stage: str, config: dict) -> dict:
         lc = dict(config.get("loop_closure", {}))
         _rk = lc.get("robust_kernel")
         _rs = lc.get("robust_scale", 1.0)
-        if (_rk is None or (isinstance(_rk, str) and _rk.lower() in ("", "none"))) \
-                and float(_rs) == 1.0:
+        if (_rk is None or (isinstance(_rk, str) and _rk.lower() in ("", "none"))) and float(
+            _rs
+        ) == 1.0:
             lc.pop("robust_kernel", None)
             lc.pop("robust_scale", None)
         return {

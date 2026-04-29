@@ -72,8 +72,7 @@ def _make_robust(
         estimator = m_est.DCS.Create(float(scale))
     else:
         raise ValueError(
-            f"unknown robust kernel: {kernel!r} "
-            "(expected none|huber|cauchy|gm|gemanmcclure|dcs)"
+            f"unknown robust kernel: {kernel!r} (expected none|huber|cauchy|gm|gemanmcclure|dcs)"
         )
     return gtsam.noiseModel.Robust.Create(estimator, base)
 
