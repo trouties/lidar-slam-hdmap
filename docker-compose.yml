@@ -1,7 +1,7 @@
 # SUP-09 one-command reproduction stack.
 #
 # Usage (on a clean x86_64 Linux machine):
-#   git clone <repo> && cd lidar-slam-hdmap
+#   git clone <repo> && cd lidar-slam-lanelet2
 #   docker compose build           # ~6-8 min, pip install dominates
 #   docker compose up              # ~1-2 min: hydrate subset + run pipeline
 #
@@ -17,7 +17,7 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.sup09
-    image: lidar-slam-hdmap-sup09:latest
+    image: lidar-slam-lanelet2-sup09:latest
     environment:
       # GitHub Release asset URL. Override via shell env or a local .env file
       # if you mirror the tarball elsewhere. Keeping the default empty lets

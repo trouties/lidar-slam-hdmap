@@ -3,9 +3,9 @@ requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "lidar-slam-hdmap-pipeline"
+name = "lidar-slam-lanelet2-pipeline"
 version = "0.1.0"
-description = "LiDAR-inertial SLAM with HD Map feature extraction pipeline"
+description = "LiDAR-inertial SLAM with Lanelet2 lane-level mapping pipeline"
 requires-python = ">=3.10"
 dependencies = [
     "numpy<2.0",
